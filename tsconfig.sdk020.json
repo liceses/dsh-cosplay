@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@deepseek-ai/*": ["D:/developing/DSH-plugin/upgrade/_sdk-020/node_modules/@deepseek-ai/*"]
+    }
+  }
+}

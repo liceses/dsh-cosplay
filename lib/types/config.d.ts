@@ -1,0 +1,85 @@
+/**
+ * dsh-cosplay — 默认配置（**纯常量**，浏览器半边要读它）。
+ *
+ * 这个文件刻意不 import schemastery：schema 在 `schema.ts`（host only），
+ * 形状与默认值在这里，两边共用一份常量，避免"面板显示的值"与"代码里的默认值"漂移。
+ */
+import type { CardMode } from './types.js';
+/** 配置形状。 */
+export interface CosplayConfig {
+    /** 总开关：关掉后既不注入也不改写。 */
+    enabled: boolean;
+    /**
+     * 生效方式策略：
+     * - `card`（默认）：按每张卡的 `mode` 决定；
+     * - `system` / `rewrite`：全局强制覆盖（实验与逃生阀用）。
+     */
+    strategy: 'card' | 'system' | 'rewrite';
+    /** 新会话默认角色卡 id；留空 = 不自动上角色。 */
+    defaultCardId: string;
+    /** 是否给"从没在 UI 里打开过"的会话也套用默认卡（默认关：避免污染 subagent 会话）。 */
+    injectIntoUnboundSessions: boolean;
+    /** 改写用的 provider；留空 = 用当前默认模型。 */
+    rewriteProvider: string;
+    /** 改写用的 model；留空 = 用当前默认模型。 */
+    rewriteModel: string;
+    /** 改写温度。 */
+    rewriteTemperature: number;
+    /** 单次改写超时（ms）。 */
+    rewriteTimeoutMs: number;
+    /** 送进改写的用户输入上限（字符）。 */
+    rewriteMaxInputChars: number;
+    /** 改写输出上限（字符）。 */
+    rewriteMaxOutputChars: number;
+    /** 改写失败时的行为：original = 用原文继续（默认）；block = 拒绝这一步。 */
+    rewriteOnFailure: 'original' | 'block';
+    /**
+     * 改写时带多少条最近对话（人话 + 助手话）作为上下文。
+     *
+     * 为什么需要：改写调用本身是**无状态**的。没有上下文时，"把这个提交到仓库"里的
+     * "这个"没有指代对象，模型会抓住它上下文里唯一存在的名词（也就是卡片自己的规则），
+     * 于是把**任务主体**换掉。0 = 关闭（退回旧行为）。
+     */
+    rewriteContextTurns: number;
+    /** 带进改写的上下文总字数上限（单条另有 800 字上限）。 */
+    rewriteContextMaxChars: number;
+    /**
+     * 原文含指代词（这个/它/上一轮…）但拿不到上下文时，**跳过改写**、原样放行。
+     *
+     * 保守优先于"编一个"：无法解析指代时改写必然瞎猜主体，保留原文至少不会把任务改错。
+     */
+    rewriteGuardUnresolved: boolean;
+    /**
+     * 是否在系统提示词**最末尾**再放一句角色的原话（"尾部回声"）。
+     *
+     * 默认**开**，依据是本项目自己的对照实验（`scripts/experiment-persona.mjs`，
+     * 同模型同卡同探针，只差这一行；3 轮 × 两组）：
+     *   - 人设标记（猫娘=「喵」）密度：开 1.16/百字 vs 关 0.91/百字；
+     *   - 独立评审（不知分组）按固定 rubric 打分：开 17 / 关 10，差异主要在
+     *     "角色认知边界的处理"与"元话语"；
+     *   - 代价约 +40 字/请求；实测回声落在全部官方段之后（真末尾）。
+     * 文献提示推理模型对首尾复述的收益**更小**（我们的默认模型就是 high reasoning），
+     * 所以这里的结论只当作"无害 + 略有帮助"，样本不大；不想要就把这个开关关掉。
+     */
+    personaEcho: boolean;
+    /** 系统注入正文的长度上限（字符），保护上下文。 */
+    personaMaxChars: number;
+    /** 是否在「对话 / 轨迹」旁显示「角色」页签。 */
+    showTab: boolean;
+    /** 角色卡封面宽高比（1 = 近方形）。 */
+    coverAspect: number;
+    /** 卡片库目录；留空 = `<DSH_HOME>/cosplay`。 */
+    storagePath: string;
+    /** 立绘上传前压到的最长边（px）。 */
+    artMaxEdge: number;
+    /** 立绘压缩质量（0.1..1）。 */
+    artQuality: number;
+    /** 诊断环形缓冲容量。 */
+    traceSize: number;
+}
+/** 默认配置。 */
+export declare const DEFAULT_CONFIG: CosplayConfig;
+/** 默认卡片的生效方式（预置卡与新建卡共用）。 */
+export declare const DEFAULT_CARD_MODE: CardMode;
+/** 把面板读到的原始值补成完整配置。 */
+export declare function resolveConfig(raw: unknown): CosplayConfig;

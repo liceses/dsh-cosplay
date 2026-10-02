@@ -1,0 +1,21 @@
+# 依赖与构建临时物
+node_modules/
+*.tsbuildinfo
+*.log
+
+# 本仓库自己的开发辅助：只放行 showme 证据页（README 引用它），其余忽略
+# （实验数据、会话 id、lab 服务日志都不该进仓库；presets/templates 是报告工具的脚手架）
+.dsh/*
+!.dsh/showme/
+.dsh/showme/presets/
+.dsh/showme/templates/
+.dsh-vision/
+
+# 与本插件无关的临时产物：`miku/` 是同工作区里另一个交付物（初音页面），
+# 被改写事故牵连生成的 `hatsune-stage/`、`.tmp-*` 同理 —— 都不属于本仓库
+miku/
+hatsune-stage/
+muscle-prompt-forge/
+.tmp-*
+
+# 注意：lib/ **不入这里** —— 构建产物是刻意入库的（git 安装免编译，见 README）

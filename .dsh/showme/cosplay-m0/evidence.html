@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh-cosplay · M0 探针证据报告</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #171a22; --card2: #1d212b; --line: #2a2f3a;
+    --fg: #e8eaf0; --dim: #9aa3b2; --brand: #6b8afd; --ok: #35c07d; --warn: #e5a13a; --bad: #e5685f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.7 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 30px 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .sub { color: var(--dim); font-size: 13px; }
+  .grid { display: grid; gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .item { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 12px; padding: 16px 18px; margin-top: 14px; }
+  .item.problem { border-left-color: var(--bad); }
+  .item.ok { border-left-color: var(--ok); }
+  .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .id { font: 12px/1 var(--mono); color: var(--dim); letter-spacing: .04em; }
+  .title { font-weight: 600; font-size: 15px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+  .badge.pass { color: #05261a; background: var(--ok); border-color: var(--ok); font-weight: 600; }
+  code, pre { font-family: var(--mono); font-size: 12px; }
+  code { background: var(--card2); padding: 1px 5px; border-radius: 5px; border: 1px solid var(--line); }
+  pre { background: #0b0e14; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow: auto; margin: 10px 0 0; white-space: pre-wrap; word-break: break-word; }
+  .why { color: var(--dim); font-size: 13px; margin: 6px 0 0; }
+  .shots { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  figure { margin: 0; }
+  figure img { width: 100%; border: 1px solid var(--line); border-radius: 10px; display: block; }
+  figcaption { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .verdict { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  select, input[type=text], textarea { background: #0b0e14; color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font: 13px/1.4 system-ui, sans-serif; }
+  textarea { width: 100%; min-height: 44px; resize: vertical; font-family: var(--mono); font-size: 12px; }
+  button { background: var(--brand); color: #06122e; border: 0; border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  .summary { position: sticky; top: 0; z-index: 5; background: linear-gradient(180deg, var(--bg) 70%, transparent); padding: 14px 0 10px; }
+  .legend { color: var(--dim); font-size: 12px; }
+  ul { margin: 6px 0 0 18px; padding: 0; }
+  li { margin: 2px 0; }
+  .ok-mark { color: var(--ok); font-weight: 700; }
+  .kbd { font-family: var(--mono); font-size: 12px; background: var(--card2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+  a { color: var(--brand); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>dsh-cosplay · M0 探针证据报告</h1>
+  <p class="sub">
+    四条“只能靠实测确定”的机制已经全部钉死 —— 每条都有可读回执 + 源码坐标。
+    下面每条都请你给个判定；判完点右上「复制我的判定」把一行行结论发我，我据此进 M1。
+  </p>
+
+  <div class="summary">
+    <div class="legend">判定汇总（可复制）</div>
+    <pre id="summary">（在下面对每条选择判定后，这里会自动生成可复制的一行行结论）</pre>
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <button onclick="copySummary()">复制我的判定</button>
+      <button class="ghost" onclick="markAll('pass')">全部标为通过</button>
+      <button class="ghost" onclick="markAll('problem')">全部标为有问题</button>
+    </div>
+  </div>
+
+  <h2>一、视觉证据：页签真的坐在「对话 / 轨迹」旁边</h2>
+  <div class="card">
+    <p class="why">
+      在 <code>lab</code> 剖面（<b>0.1.7-rc.2</b>，独立端口 31999，一个只含 base+web-app 的干净剖面）里实测：
+      页签条读作 <b>对话 · 轨迹 · 角色</b>，点进去就是我们的视图。截图取自真实浏览器（Agent Window）。
+    </p>
+    <div class="shots" style="margin-top:12px;">
+      <figure>
+        <img src="tab-strip.jpg" alt="对话/轨迹/角色 三个页签">
+        <figcaption>① 「角色」页签与「对话 / 轨迹」并列（此时停在「对话」）。注意左侧同一会话里就是你给我的需求原文。</figcaption>
+      </figure>
+      <figure>
+        <img src="probe-view.jpg" alt="角色页签内的 M0 探针视图">
+        <figcaption>② 点开「角色」：M0 探针视图（链路计数 + 最近诊断），诊断里能看到客户端回执与宿主事件。</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="item" id="i1" data-id="item-1">
+    <div class="head">
+      <span class="id">item-1</span>
+      <span class="title">客户端半边能装载、页签注册成功并进入 tab 列表</span>
+      <span class="badge pass">已证</span>
+    </div>
+    <p class="why">
+      机制：<span class="kbd">ctx.slots.inject('conversation.view', () =&gt; ctx.slots.register({name,id,order,label}, View))</span>，
+      —— 关键疑问是「从根 fiber 注册一个 <b>session 作用域</b>的槽位到底行不行」。实测：<b>行</b>，不需要会话 fiber 那套绕法。
+    </p>
+    <pre>client:client-apply      build=m0-probe-a plugin=dsh-cosplay
+client:view-slot-declared conversation.view 已声明 → 准备注册 cosplay
+client:view-registered   register 成功 id=cosplay order=20 · conversation.view 现有条目 [cosplay]
+client:view-label        页签标签被 tab 列表读取：id=cosplay label=角色
+client:view-mounted      「角色」页签组件已渲染（M0 探针视图）</pre>
+    <p class="why">
+      产物侧证据：宿主把 client bundle 交给了页面 ——
+      <code>inGraph=true url=plugins/??dsh-cosplay/client.js&amp;rev=f91c6eb548dd</code>，实际 GET 返回
+      <code>200 text/javascript</code>；bundle 开头是 <code>window.__ModuleLoader__.load({ id: "dsh-cosplay", factory …</code>。
+    </p>
+    <div class="verdict">
+      <span>判定</span>
+      <select data-verdict>
+        <option value="pass">通过</option>
+        <option value="problem">有问题</option>
+      </select>
+      <span>备注</span>
+      <input type="text" data-note placeholder="想改什么/担心什么（可留空）" style="flex:1; min-width:220px;">
+    </div>
+  </div>
+
+  <div class="item" id="i2" data-id="item-2">
+    <div class="head">
+      <span class="id">item-2</span>
+      <span class="title">系统提示段能按会话拿到 agent.id</span>
+      <span class="badge pass">已证</span>
+    </div>
+    <p class="why">
+      机制：<span class="kbd">ctx.systemPrompt.section({name:'dsh-cosplay:persona', order: DEPLOYMENT_PERSONA_PREFIX+1, interpolate:false, text:(ctx)=&gt;…})</span>。
+      疑问是：<b>text() 的装配上下文里有没有会话身份</b>（决定“每个会话各自一张卡”能不能做）。实测：<b>有</b>，
+      <code>agentId=session-…</code>，且 <code>scope=present</code>、键为 <code>[agent,scope,signal]</code>。
+    </p>
+    <pre>host:prompt-section  section=dsh-cosplay:persona order=1 agentId=session-85f772c1-… typeof=string scope=present keys=[agent,scope,signal]</pre>
+    <p class="why">
+      顺带定下两条纪律：段名必须自起（复用 <code>deployment:persona-prefix</code> 会与官方注册撞名抛错）；
+      <code>interpolate:false</code> 是必须的 —— 卡片正文出现 <code>{{…}}</code> 时默认严格插值会抛错并让整次装配失败。
+    </p>
+    <div class="verdict">
+      <span>判定</span>
+      <select data-verdict>
+        <option value="pass">通过</option>
+        <option value="problem">有问题</option>
+      </select>
+      <span>备注</span>
+      <input type="text" data-note placeholder="（可留空）" style="flex:1; min-width:220px;">
+    </div>
+  </div>
+
+  <div class="item" id="i3" data-id="item-3">
+    <div class="head">
+      <span class="id">item-3</span>
+      <span class="title">发送时改写：用户消息被替换，且 durable 日志里就是改写后的正文</span>
+      <span class="badge pass">已证</span>
+    </div>
+    <p class="why">
+      这是你选的路线（<b>模型改写 + 每次发送自动改写</b>）的立足点。机制：<span class="kbd">agent/pre-step</span> 瀑布里调用
+      <code>next()</code> 保留动态上下文消息，再把 <code>role==='user'</code> 的消息正文替换掉。
+      实测链条（一个真实回合，探针会话，已归档）：
+    </p>
+    <pre>host:pre-step-message   role=user source.kind=user blocks=text 文本=63字 step=1
+host:pre-step-rewrite   命中探针标记 → 改写为 79 字（原 63 字）
+host:durable-user-message seq=9 id=cecdda8f-… 正文=79字 预览：[cosplay-probe] cosplay-probe-marker 请只回复一句话：…
+host:assistant-message   seq=19 step=1 正文=191字 预览：`[cosplay-probe] cosplay-probe-marker` 请只回复一句话：…
+host:turn-end            seq=21 fields=[reason,turn]</pre>
+    <p class="why">
+      三条结论：<b>①</b> 人提交的消息 <code>source.kind === 'user'</code>（M1 的白名单按它定，绝不碰
+      system-reminder / skills / runtime-context 那些同样是 user 角色的系统消息）；
+      <b>②</b> 改写后的正文被 durable 写成 <code>user/message</code>，且<b>沿用原 message id</b>（幂等键成立）；
+      <b>③</b> 模型真的收到了改写后的文本（它把它原样复述了出来），回合正常收尾没被打断。
+    </p>
+    <p class="why">
+      含义：以后「对话」里那条用户消息本身就是改写后的 prompt —— 模型收到的与日志逐字一致，
+      不需要另做一层“实际发送了什么”的黑箱展示。
+    </p>
+    <div class="verdict">
+      <span>判定</span>
+      <select data-verdict>
+        <option value="pass">通过</option>
+        <option value="problem">有问题</option>
+      </select>
+      <span>备注</span>
+      <input type="text" data-note placeholder="（可留空）" style="flex:1; min-width:220px;">
+    </div>
+  </div>
+
+  <div class="item" id="i4" data-id="item-4">
+    <div class="head">
+      <span class="id">item-4</span>
+      <span class="title">跨版本与工程门禁都立在原地</span>
+      <span class="badge pass">已证</span>
+    </div>
+    <ul>
+      <li><span class="ok-mark">✓</span> 同一个包在 <b>0.2.0-rc.1（桌面剖面）</b> 与 <b>0.1.7-rc.2（lab 剖面）</b> 上都激活成功 —— peer 区间写 <code>&gt;=0.1.7-rc.1 &lt;0.3</code>。</li>
+      <li><span class="ok-mark">✓</span> <code>tsc --noEmit</code> 零错误；客户端 bundle 只 require <code>[react, react/jsx-runtime]</code>（全在运行时 seed 的 9 个平台模块里）。</li>
+      <li><span class="ok-mark">✓</span> 纯净化门禁（<code>scripts/check-client-purity.mjs</code>）通过，并把「除平台模块外一律内联」变成会失败的门禁。</li>
+      <li><span class="ok-mark">✓</span> 宿主半边热装（plugin_manager 安装 + 重挂）在桌面端生效；<b>已知限制</b>：改宿主代码后重挂仍会命中 Node 的模块缓存 —— 真正生效要重启应用，所以我另起了一个 <b>lab 开发剖面（端口 31999）</b>做迭代与端到端验证，不打扰你正在用的窗口。</li>
+    </ul>
+    <div class="verdict">
+      <span>判定</span>
+      <select data-verdict>
+        <option value="pass">通过</option>
+        <option value="problem">有问题</option>
+      </select>
+      <span>备注</span>
+      <input type="text" data-note placeholder="（可留空）" style="flex:1; min-width:220px;">
+    </div>
+  </div>
+
+  <h2>二、M0 的代价与未做的事（如实交代）</h2>
+  <div class="card">
+    <ul>
+      <li>探针回合花掉了<b>一个真实模型回合</b>（lab 剖面的默认模型；系统提示 + 技能清单一共约 1.4 万字符上下文），会话已归档。</li>
+      <li>探针只在<b>武装 + 消息带标记</b>时才可能改写，且只为被改写过的会话记录诊断 —— 你的日常对话在这一阶段<b>零影响</b>。</li>
+      <li>还没有做：角色卡数据结构落地、卡片库、导入导出、预设卡、真实改写调用（<code>ctx.llm.stream</code>）、页签里的网格/二级详情 —— 全部是 M1。</li>
+      <li>桌面端的浏览器半边需要<b>刷新一次页面</b>才会出现「角色」页签（宿主已就绪；我已用 lab 剖面的真实浏览器证明了页面侧一切正常）。</li>
+    </ul>
+  </div>
+
+  <h2>三、接下来（M1）我会做的事</h2>
+  <div class="card">
+    <p class="why">按已批准的方案推进，两个链路都做，卡里可选：</p>
+    <ul>
+      <li><b>人物卡（system）</b>：卡片 persona 注入 <code>dsh-cosplay:persona</code> 段，按会话取卡，长度上限保护上下文。</li>
+      <li><b>改写卡（rewrite）</b>：<code>agent/pre-step</code> 里用 <code>ctx.llm.stream</code>（当前默认模型）按卡片规则改写；超时/失败一律回落原文并留痕；按 message.id 幂等不重复计费。</li>
+      <li><b>角色页签</b>：近方形圆角卡片网格 → 点击进二级详情 → 自定义编辑 → 立绘上传（客户端压到 1024px）→ 绑定/停用/设为默认。</li>
+      <li><b>库与分享</b>：<code>&lt;DSH_HOME&gt;/cosplay/</code>（library.json + art/ 按 sha256 去重 + state.json），单文件包 <code>cosplay-*.json</code>（立绘内联 base64）导入导出，原子写 + .bak + 坏库隔离。</li>
+      <li><b>预设卡</b>：猫娘、硬邦邦（你给的规则与两个示例原样收进 rules/examples）、翻译官、严苛评审…</li>
+    </ul>
+  </div>
+
+</div>
+
+<script>
+  const items = [...document.querySelectorAll('.item')];
+  const labels = { pass: '通过', problem: '有问题' };
+  let lastPosted = '';
+
+  function summaryText() {
+    const lines = [];
+    let pass = 0, problem = 0;
+    for (const el of items) {
+      const id = el.dataset.id;
+      const title = el.querySelector('.title').textContent.trim();
+      const verdict = el.querySelector('[data-verdict]').value;
+      const note = el.querySelector('[data-note]').value.trim();
+      verdict === 'pass' ? pass++ : problem++;
+      lines.push(`${id} · ${labels[verdict]} · ${title}${note ? ` · 备注：${note}` : ''}`);
+    }
+    lines.push(`—— 合计：通过 ${pass} · 有问题 ${problem} ——`);
+    return `dsh-cosplay M0 判定：\n${lines.join('\n')}`;
+  }
+
+  /** 每条判定都回传父页（showme 卡片据此给出"一键填入输入框"）。 */
+  function post() {
+    const text = summaryText();
+    if (text === lastPosted) return;
+    lastPosted = text;
+    try {
+      window.parent.postMessage({ type: 'dsh-showme-feedback', text }, '*');
+    } catch (_) {
+      /* 独立打开时没有父页，忽略 */
+    }
+  }
+
+  function refresh() {
+    for (const el of items) {
+      const verdict = el.querySelector('[data-verdict]').value;
+      el.classList.toggle('ok', verdict === 'pass');
+      el.classList.toggle('problem', verdict === 'problem');
+    }
+    document.getElementById('summary').textContent = summaryText();
+    post();
+  }
+
+  function copySummary() {
+    const text = summaryText();
+    navigator.clipboard?.writeText(text).then(
+      () => { const b = event.target; b.textContent = '已复制'; setTimeout(() => (b.textContent = '复制我的判定'), 1200); },
+      () => {},
+    );
+  }
+
+  function markAll(kind) {
+    for (const el of items) el.querySelector('[data-verdict]').value = kind;
+    refresh();
+  }
+
+  for (const el of items) {
+    el.querySelector('[data-verdict]').addEventListener('change', refresh);
+    el.querySelector('[data-note]').addEventListener('input', refresh);
+  }
+  refresh();
+</script>
+</body>
+</html>

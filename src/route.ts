@@ -1,0 +1,633 @@
+/**
+ * dsh-cosplay — HTTP 路由（host）。
+ *
+ * 一条前缀路由 `/api/dsh-cosplay`，管四类事：
+ *
+ * **卡片库**
+ *   GET  /library              卡片元数据投影 + 存储信息（页签网格与设置页用）
+ *   GET  /card/<id>            单卡全文（编辑表单用）
+ *   POST /card                 新建/更新一张自定义卡
+ *   POST /card/copy            复制为自定义卡（预设卡改动的唯一正道）
+ *   POST /card/delete          删一张自定义卡
+ *   GET  /art/<artId>          立绘字节（immutable + ETag/304）
+ *   POST /art                  存一张立绘（按 sha256 去重）
+ *
+ * **分享**
+ *   GET  /export?ids=a,b       导出包（立绘内联 base64）
+ *   POST /export/write         导出并落盘到 exports/，返回绝对路径
+ *   POST /import               导入包
+ *
+ * **本会话**
+ *   GET  /binding?sessionId=   读本会话绑定与开关
+ *   POST /binding              写绑定与开关（客户端在会话打开时写入生效值）
+ *   POST /rewrite              手动改写一次（预览/排障）
+ *   GET  /diagnostics?sessionId=  诊断：计数 + 本会话改写记录 + 轨迹尾
+ *
+ * **机制自检与观测**
+ *   GET  /stats · /trace · /client-entry   宿主诊断
+ *   POST /debug                             客户端回执入口
+ *   POST /probe/arm · /probe/turn · /probe/archive   一次性探针（M0 保留）
+ *
+ * ## 围栏
+ *
+ * **只接受回环 Host，且不发任何 CORS 头**（与 dsh-showme-html / dsh-memes-reply 同款）。
+ * 每个写端点都有请求体上限；`art` 的白名单是"按字节签名判定"而不是信任声明的 mime。
+ */
+
+import type { Context } from '@deepseek-ai/cordis'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { cardToMeta, sniffImage } from './cards.js'
+import type { CosplayConfig } from './config.js'
+import type { Library } from './library.js'
+import { messageOf, composeRewriteSystem } from './prompt.js'
+import {
+  CLIENT_ENTRY_PATH,
+  DEBUG_PATH,
+  LIBRARY_PATH,
+  MAX_ART_BYTES,
+  MAX_BODY_BYTES,
+  MAX_DEBUG_NOTE_CHARS,
+  PACKAGE_NAME,
+  PROBE_ARCHIVE_PATH,
+  PROBE_ARM_PATH,
+  PROBE_MARKER,
+  PROBE_TURN_PATH,
+  ROUTE_PREFIX,
+  STATS_PATH,
+  TRACE_PATH,
+} from './protocol.js'
+import type { RewriteResult } from './rewrite.js'
+import type { StateStore } from './state.js'
+import type { Trace } from './trace.js'
+import type { CosplayCard, CosplayStats } from './types.js'
+
+/** 本插件的运行时状态（由 index.ts 持有）。 */
+export interface ProbeRuntime {
+  /** M0 探针是否武装：只有武装时 pre-step 才会改写带 `cosplay-probe-marker` 的消息。 */
+  armed: boolean
+  /**
+   * 被本插件**改写过**的会话集合。
+   *
+   * `session/event` 是进程级的（每个会话的每条事件都会经过 observe.ts），所以 durable
+   * 观测用这个集合当闸门：只有被我们改写过正文的会话才值得记录"消息到底写成了什么"，
+   * 其余会话一条都不记（隐私与噪声都省）。
+   */
+  touched: Set<string>
+  /** 起过的探针会话 id。 */
+  sessions: string[]
+}
+
+/** 结构化最小面：会话控制器（只用于探针端点）。 */
+interface SessionControllerLike {
+  create(request: { cwd?: string }): Promise<{ sessionId: string }>
+  prompt(
+    request: {
+      requestId: string
+      sessionId: string
+      mode: 'queue' | 'steer'
+      content: readonly { type: 'text'; text: string }[]
+    },
+    signal: AbortSignal,
+  ): Promise<{ accepted: true }>
+}
+
+/** 结构化最小面：归档会话。 */
+interface WorkspaceControllerLike {
+  archiveSession(request: { sessionId: string; stopActivity?: boolean }): Promise<{ sessionId: string }>
+}
+
+/** 结构化最小面：Web 客户端装配图。 */
+interface ClientModulesLike {
+  graph(): {
+    rev: string
+    entries: { id: string; url: string; rev: string; inject?: string[] }[]
+    batches: { phase: string; url: string; rev: string; entries: string[] }[]
+  }
+}
+
+/** 路由依赖。 */
+export interface RouteDeps {
+  ctx: Context
+  config: () => CosplayConfig
+  stats: CosplayStats
+  trace: Trace
+  probe: ProbeRuntime
+  library: () => Library
+  state: () => StateStore
+  /** 手动改写用（与 pre-step 同一条实现）。 */
+  rewrite: (request: { card: CosplayCard; input: string; sessionId: string; signal: AbortSignal }) => Promise<RewriteResult>
+}
+
+/** 只接受回环 Host。 */
+export function isLoopback(req: IncomingMessage): boolean {
+  const host = String(req.headers.host ?? '')
+  const name = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0]
+  return name === '127.0.0.1' || name === 'localhost' || name === '::1'
+}
+
+/** 统一 JSON 响应。 */
+export function sendJson(res: ServerResponse, status: number, payload: unknown): void {
+  const body = JSON.stringify(payload)
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': String(Buffer.byteLength(body)),
+    'Cache-Control': 'no-store',
+  })
+  res.end(body)
+}
+
+/** 读一个小请求体（超限直接掐掉，返回 undefined）。 */
+async function readBody(req: IncomingMessage, limit: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    let raw = ''
+    req.setEncoding('utf8')
+    req.on('data', (chunk: string) => {
+      raw += chunk
+      if (raw.length > limit) {
+        req.destroy()
+        resolve(undefined)
+      }
+    })
+    req.on('end', () => resolve(raw))
+    req.on('error', () => resolve(undefined))
+  })
+}
+
+/** pathname（去掉 query）。 */
+function pathnameOf(url: string | undefined): string {
+  const raw = url ?? '/'
+  const cut = raw.indexOf('?')
+  return cut < 0 ? raw : raw.slice(0, cut)
+}
+
+/** query 参数。 */
+function queryOf(url: string | undefined, key: string): string | null {
+  const raw = url ?? ''
+  const cut = raw.indexOf('?')
+  if (cut < 0) return null
+  return new URLSearchParams(raw.slice(cut + 1)).get(key)
+}
+
+/** 解析 JSON 体。 */
+function parseJson(raw: string | undefined): Record<string, unknown> | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined
+  try {
+    const value = JSON.parse(raw) as unknown
+    return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 立绘 id 形状。 */
+const ART_ID_RE = /^a-[0-9a-f]{16}$/
+
+/** 构建这条前缀路由。 */
+export function createCosplayRoute(deps: RouteDeps): WebRoute {
+  const { ctx, config, stats, trace, probe } = deps
+
+  /** 状态行。 */
+  const statsPayload = (): Record<string, unknown> => {
+    const cfg = config()
+    return {
+      ok: true,
+      plugin: PACKAGE_NAME,
+      stats,
+      config: {
+        enabled: cfg.enabled,
+        strategy: cfg.strategy,
+        defaultCardId: cfg.defaultCardId,
+        showTab: cfg.showTab,
+        rewriteProvider: cfg.rewriteProvider,
+        rewriteModel: cfg.rewriteModel,
+        rewriteTimeoutMs: cfg.rewriteTimeoutMs,
+        rewriteOnFailure: cfg.rewriteOnFailure,
+      },
+      probe: { armed: probe.armed, sessions: probe.sessions, touched: [...probe.touched] },
+      trace: { size: trace.size(), capacity: trace.capacity() },
+      ts: Date.now(),
+    }
+  }
+
+  /** 发立绘字节（ETag + immutable + 304）。 */
+  const sendArt = (req: IncomingMessage, res: ServerResponse, artId: string): void => {
+    const found = deps.library().artBytes(artId)
+    if (found === undefined) {
+      sendJson(res, 404, { ok: false, error: `立绘不存在：${artId}` })
+      return
+    }
+    const etag = `"${found.sha256}"`
+    const headers: Record<string, string> = {
+      'Content-Type': found.mime,
+      ETag: etag,
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
+    }
+    if (String(req.headers['if-none-match'] ?? '') === etag) {
+      res.writeHead(304, headers)
+      res.end()
+      return
+    }
+    headers['Content-Length'] = String(found.bytes.byteLength)
+    res.writeHead(200, headers)
+    if ((req.method ?? 'GET').toUpperCase() === 'HEAD') res.end()
+    else res.end(found.bytes)
+  }
+
+  return {
+    kind: 'prefix',
+    path: ROUTE_PREFIX,
+    handler: async (req, res) => {
+      if (!isLoopback(req)) {
+        sendJson(res, 403, { ok: false, error: 'loopback only' })
+        return
+      }
+      const path = pathnameOf(req.url)
+      const method = (req.method ?? 'GET').toUpperCase()
+      const rest = path.slice(ROUTE_PREFIX.length)
+
+      // ── 诊断 ───────────────────────────────────────────────────────────────
+      if (path === STATS_PATH && (method === 'GET' || method === 'HEAD')) {
+        sendJson(res, 200, statsPayload())
+        return
+      }
+      if (path === TRACE_PATH && method === 'GET') {
+        const raw = queryOf(req.url, 'limit')
+        const limit = raw === null || raw.trim() === '' ? 50 : Number(raw)
+        sendJson(res, 200, {
+          ok: true,
+          capacity: trace.capacity(),
+          size: trace.size(),
+          entries: trace.list(Number.isFinite(limit) ? limit : 50),
+        })
+        return
+      }
+      if (path === DEBUG_PATH && method === 'POST') {
+        const body = parseJson(await readBody(req, 64 * 1024))
+        if (body === undefined) {
+          sendJson(res, 400, { ok: false, error: 'body 必须是 JSON 对象' })
+          return
+        }
+        trace.push({
+          kind: typeof body.kind === 'string' && body.kind !== '' ? `client:${body.kind}` : 'client:?',
+          ...(typeof body.sessionId === 'string' && body.sessionId !== '' ? { sessionId: body.sessionId } : {}),
+          ...(typeof body.turn === 'number' && Number.isFinite(body.turn) ? { turn: body.turn } : {}),
+          ...(typeof body.id === 'string' && body.id !== '' ? { id: body.id } : {}),
+          note: typeof body.note === 'string' ? body.note.slice(0, MAX_DEBUG_NOTE_CHARS) : '',
+        })
+        sendJson(res, 200, { ok: true })
+        return
+      }
+      if (path === CLIENT_ENTRY_PATH && method === 'GET') {
+        const modules = ctx.get('clientModules') as ClientModulesLike | undefined
+        if (modules === undefined) {
+          sendJson(res, 503, { ok: false, error: 'clientModules 服务不在（这个部署没有 Web 客户端装配）' })
+          return
+        }
+        try {
+          const graph = modules.graph()
+          const entry = graph.entries.find((candidate) => candidate.id === PACKAGE_NAME)
+          sendJson(res, 200, {
+            ok: true,
+            rev: graph.rev,
+            inGraph: entry !== undefined,
+            entry: entry ?? null,
+            batches: graph.batches.filter((batch) => batch.entries.includes(PACKAGE_NAME)),
+            graphEntries: graph.entries.length,
+          })
+        } catch (error) {
+          sendJson(res, 500, { ok: false, error: messageOf(error) })
+        }
+        return
+      }
+
+      // ── 卡片库 ─────────────────────────────────────────────────────────────
+      if (path === LIBRARY_PATH && method === 'GET') {
+        const library = deps.library()
+        sendJson(res, 200, {
+          ok: true,
+          root: library.info().root,
+          info: library.info(),
+          cards: library.metas(),
+          // 最后一次成功绑定的卡：新会话 chip 没有显式绑定时自动预选它（"换会话不换角色"）。
+          lastCardId: deps.state().lastCardId(),
+          config: {
+            enabled: config().enabled,
+            strategy: config().strategy,
+            defaultCardId: config().defaultCardId,
+            coverAspect: config().coverAspect,
+            artMaxEdge: config().artMaxEdge,
+            artQuality: config().artQuality,
+          },
+          ts: Date.now(),
+        })
+        return
+      }
+
+      if (rest.startsWith('/card/') && method === 'GET') {
+        const id = rest.slice('/card/'.length)
+        const card = deps.library().get(id)
+        if (card === undefined) sendJson(res, 404, { ok: false, error: `卡不存在：${id}` })
+        else sendJson(res, 200, { ok: true, card })
+        return
+      }
+
+      if (rest === '/card' && method === 'POST') {
+        const body = parseJson(await readBody(req, MAX_BODY_BYTES))
+        if (body === undefined) {
+          sendJson(res, 400, { ok: false, error: 'body 必须是 JSON 对象' })
+          return
+        }
+        const result = deps.library().upsert(body.card ?? body)
+        sendJson(res, result.card === undefined ? 400 : 200, {
+          ok: result.card !== undefined,
+          card: result.card ?? null,
+          issues: result.issues,
+        })
+        return
+      }
+
+      if (rest === '/card/copy' && method === 'POST') {
+        const body = parseJson(await readBody(req, MAX_BODY_BYTES))
+        const id = typeof body?.id === 'string' ? body.id : ''
+        const overrides = body?.overrides !== null && typeof body?.overrides === 'object' ? (body.overrides as Record<string, unknown>) : {}
+        const result = deps.library().copyCard(id, overrides)
+        sendJson(res, result.card === undefined ? 404 : 200, {
+          ok: result.card !== undefined,
+          card: result.card ?? null,
+          issues: result.issues,
+        })
+        return
+      }
+
+      if (rest === '/card/delete' && method === 'POST') {
+        const body = parseJson(await readBody(req, 64 * 1024))
+        const id = typeof body?.id === 'string' ? body.id : ''
+        const removed = deps.library().remove(id)
+        sendJson(res, removed ? 200 : 404, { ok: removed, id })
+        return
+      }
+
+      if (rest === '/art/prune' && method === 'POST') {
+        const removed = deps.library().pruneOrphanArt()
+        trace.push({ kind: 'host:art-prune', note: `清理无引用立绘 ${removed} 张` })
+        sendJson(res, 200, { ok: true, removed })
+        return
+      }
+
+      if (rest.startsWith('/art/') && (method === 'GET' || method === 'HEAD')) {
+        const artId = rest.slice('/art/'.length)
+        if (!ART_ID_RE.test(artId)) {
+          sendJson(res, 400, { ok: false, error: 'artId 形状不合法' })
+          return
+        }
+        sendArt(req, res, artId)
+        return
+      }
+
+      if (rest === '/art' && method === 'POST') {
+        const body = parseJson(await readBody(req, MAX_ART_BYTES))
+        if (body === undefined) {
+          sendJson(res, 400, { ok: false, error: `body 必须是 JSON 对象（且不超过 ${Math.round(MAX_ART_BYTES / 1024 / 1024)} MB）` })
+          return
+        }
+        const base64 = typeof body.base64 === 'string' ? body.base64 : ''
+        if (base64 === '') {
+          sendJson(res, 400, { ok: false, error: '缺少 base64' })
+          return
+        }
+        const bytes = new Uint8Array(Buffer.from(base64, 'base64'))
+        if (bytes.byteLength === 0) {
+          sendJson(res, 400, { ok: false, error: 'base64 解出来是空字节' })
+          return
+        }
+        if (bytes.byteLength > MAX_ART_BYTES / 2) {
+          sendJson(res, 413, { ok: false, error: `立绘超过上限（${(MAX_ART_BYTES / 2 / 1024 / 1024).toFixed(0)} MB）` })
+          return
+        }
+        const sniffed = sniffImage(bytes)
+        if (sniffed === undefined) {
+          sendJson(res, 415, { ok: false, error: '只接受 PNG / JPEG / GIF / WebP（按字节签名判定）' })
+          return
+        }
+        const stored = deps.library().putArt({
+          bytes,
+          ...(typeof body.width === 'number' && Number.isFinite(body.width) ? { width: Math.trunc(body.width) } : {}),
+          ...(typeof body.height === 'number' && Number.isFinite(body.height) ? { height: Math.trunc(body.height) } : {}),
+        })
+        sendJson(res, stored.art === null ? 400 : 200, { ok: stored.art !== null, art: stored.art, issues: stored.issues })
+        return
+      }
+
+      // ── 分享：导出/导入 ────────────────────────────────────────────────────
+      if (rest === '/export' && method === 'GET') {
+        const raw = queryOf(req.url, 'ids')
+        const ids = raw === null || raw.trim() === '' ? undefined : raw.split(',').map((id) => id.trim()).filter((id) => id !== '')
+        const pack = deps.library().exportPack(ids)
+        trace.push({ kind: 'host:export', note: `导出 ${pack.cards.length} 张卡 · 内联立绘 ${Object.keys(pack.art).length} 张` })
+        sendJson(res, 200, pack)
+        return
+      }
+
+      if (rest === '/export/write' && method === 'POST') {
+        const body = parseJson(await readBody(req, 64 * 1024))
+        const ids = Array.isArray(body?.ids) ? body.ids.filter((id): id is string => typeof id === 'string') : undefined
+        try {
+          const pack = deps.library().exportPack(ids)
+          const file = deps.library().writeExport(pack)
+          trace.push({ kind: 'host:export-write', note: `${pack.cards.length} 张卡 → ${file}` })
+          sendJson(res, 200, { ok: true, path: file, cards: pack.cards.length, art: Object.keys(pack.art).length })
+        } catch (error) {
+          sendJson(res, 500, { ok: false, error: messageOf(error) })
+        }
+        return
+      }
+
+      if (rest === '/import' && method === 'POST') {
+        const body = parseJson(await readBody(req, MAX_ART_BYTES))
+        if (body === undefined) {
+          sendJson(res, 400, { ok: false, error: 'body 必须是 JSON 对象（或超过体积上限）' })
+          return
+        }
+        const pack = body.pack ?? body
+        const result = deps.library().importPack(pack)
+        trace.push({
+          kind: 'host:import',
+          note: `导入：新增 ${result.added} · 覆盖 ${result.replaced} · 跳过 ${result.skipped} · 问题 ${result.errors.length}`,
+        })
+        sendJson(res, result.ok ? 200 : 400, result)
+        return
+      }
+
+      // ── 本会话 ─────────────────────────────────────────────────────────────
+      if (rest === '/binding' && method === 'GET') {
+        const sessionId = queryOf(req.url, 'sessionId') ?? ''
+        if (sessionId === '') {
+          sendJson(res, 400, { ok: false, error: '需要 sessionId' })
+          return
+        }
+        const binding = deps.state().binding(sessionId)
+        const cardId = binding?.cardId ?? null
+        const card = cardId === null ? undefined : deps.library().get(cardId)
+        sendJson(res, 200, {
+          ok: true,
+          sessionId,
+          binding: binding ?? { cardId: null, enabled: true, updatedAt: 0 },
+          card: card === undefined ? null : cardToMeta(card, card.art === null || card.art === undefined ? '' : card.art.sha256.slice(0, 8)),
+          rewrites: deps.state().rewritesOf(sessionId, 5),
+        })
+        return
+      }
+
+      if (rest === '/binding' && method === 'POST') {
+        const body = parseJson(await readBody(req, 64 * 1024))
+        const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : ''
+        if (sessionId === '') {
+          sendJson(res, 400, { ok: false, error: '需要 sessionId' })
+          return
+        }
+        const patch: { cardId?: string | null; enabled?: boolean } = {}
+        if (body !== undefined && 'cardId' in body) patch.cardId = typeof body.cardId === 'string' && body.cardId !== '' ? body.cardId : null
+        if (body !== undefined && typeof body.enabled === 'boolean') patch.enabled = body.enabled
+        const next = deps.state().setBinding(sessionId, patch)
+        const card = next.cardId === null ? undefined : deps.library().get(next.cardId)
+        trace.push({
+          kind: 'host:binding',
+          sessionId,
+          ...(next.cardId === null ? {} : { id: next.cardId }),
+          note: `会话绑定更新：cardId=${next.cardId ?? 'null'} enabled=${String(next.enabled)}${card === undefined ? '' : ` name=${card.name}`}`,
+        })
+        sendJson(res, 200, { ok: true, binding: next })
+        return
+      }
+
+      if (rest === '/rewrite' && method === 'POST') {
+        const body = parseJson(await readBody(req, MAX_BODY_BYTES))
+        const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : ''
+        const text = typeof body?.text === 'string' ? body.text : ''
+        if (text.trim() === '') {
+          sendJson(res, 400, { ok: false, error: '需要 text' })
+          return
+        }
+        const id =
+          typeof body?.cardId === 'string' && body.cardId !== ''
+            ? body.cardId
+            : (deps.state().binding(sessionId)?.cardId ?? config().defaultCardId)
+        const card = deps.library().get(id)
+        if (card === undefined) {
+          sendJson(res, 404, { ok: false, error: `卡不存在：${id === '' ? '(未指定)' : id}` })
+          return
+        }
+        if (composeRewriteSystem(card) === '') {
+          sendJson(res, 400, { ok: false, error: `「${card.name}」没有 rewrite.rules，不能改写` })
+          return
+        }
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), Math.max(1000, config().rewriteTimeoutMs))
+        try {
+          // 手动试跑是"单句直通"：没有会话上下文，所以原文就是输入本体
+          // （要验上下文链路，用真实会话 + `/trace` 里的 host:rewrite-context）。
+          const result = await deps.rewrite({ card, input: text, sessionId, signal: controller.signal })
+          clearTimeout(timer)
+          sendJson(res, result.ok ? 200 : 502, { ...result, ok: result.ok, cardId: card.id, cardName: card.name })
+        } catch (error) {
+          clearTimeout(timer)
+          sendJson(res, 500, { ok: false, error: messageOf(error) })
+        }
+        return
+      }
+
+      if (rest === '/diagnostics' && method === 'GET') {
+        const sessionId = queryOf(req.url, 'sessionId') ?? ''
+        sendJson(res, 200, {
+          ok: true,
+          stats,
+          info: deps.library().info(),
+          orphans: deps.library().orphanArt().length,
+          ...(sessionId === '' ? {} : { sessionId, binding: deps.state().binding(sessionId) ?? null, rewrites: deps.state().rewritesOf(sessionId, 20) }),
+          trace: trace.list(40),
+        })
+        return
+      }
+
+      // ── M0 探针（保留为一次性自检） ────────────────────────────────────────
+      if (path === PROBE_ARM_PATH && method === 'POST') {
+        const body = parseJson(await readBody(req, MAX_BODY_BYTES))
+        const armed = body?.armed !== false
+        probe.armed = armed
+        trace.push({ kind: 'host:probe-arm', note: `探针 ${armed ? '已武装' : '已解除'}（只有武装时带标记的消息才会被改写）` })
+        sendJson(res, 200, { ok: true, armed })
+        return
+      }
+
+      if (path === PROBE_TURN_PATH && method === 'POST') {
+        const body = parseJson(await readBody(req, MAX_BODY_BYTES))
+        const sessions = ctx.get('sessionController') as SessionControllerLike | undefined
+        if (sessions === undefined) {
+          sendJson(res, 503, { ok: false, error: 'sessionController 服务不在（这个部署不能起探针会话）' })
+          return
+        }
+        const text =
+          typeof body?.text === 'string' && body.text.trim() !== ''
+            ? body.text
+            : `${PROBE_MARKER}\n请只回复一句话：把你在本轮收到的用户消息正文**原样**复述一遍。不要调用任何工具。`
+        try {
+          // 传了 sessionId 就往**已有会话**里发（多轮对照实验用）；否则新建一个。
+          const reuse = typeof body?.sessionId === 'string' ? body.sessionId.trim() : ''
+          let sessionId = ''
+          if (reuse !== '') {
+            sessionId = reuse
+          } else {
+            const created = await sessions.create({ cwd: process.cwd() })
+            sessionId = String(created.sessionId)
+            probe.sessions.push(sessionId)
+          }
+          // 自检用：可以在投递之前把这张卡绑到会话上（于是这一轮就走真实的注入/改写链路）。
+          const bindCardId = typeof body?.bindCardId === 'string' ? body.bindCardId.trim() : ''
+          if (bindCardId !== '') {
+            deps.state().setBinding(sessionId, { cardId: bindCardId, enabled: true })
+            trace.push({ kind: 'host:probe-turn-bound', sessionId, id: bindCardId, note: `探针会话已绑定「${bindCardId}」` })
+          }
+          trace.push({ kind: 'host:probe-turn-created', sessionId, note: `探针会话${reuse === '' ? '已创建' : '复用'}；即将投递消息（${text.length} 字）` })
+          const controller = new AbortController()
+          const timer = setTimeout(() => controller.abort(), 30_000)
+          const receipt = await sessions.prompt(
+            { requestId: `cosplay-probe-${Date.now().toString(36)}`, sessionId, mode: 'queue', content: [{ type: 'text', text }] },
+            controller.signal,
+          )
+          clearTimeout(timer)
+          trace.push({ kind: 'host:probe-turn-accepted', sessionId, note: `消息已进入收件箱：accepted=${String(receipt.accepted)}` })
+          sendJson(res, 200, { ok: true, sessionId, accepted: receipt.accepted, text })
+        } catch (error) {
+          trace.push({ kind: 'host:probe-turn-failed', note: `起探针会话失败：${messageOf(error)}` })
+          sendJson(res, 500, { ok: false, error: messageOf(error) })
+        }
+        return
+      }
+
+      if (path === PROBE_ARCHIVE_PATH && method === 'POST') {
+        const body = parseJson(await readBody(req, MAX_BODY_BYTES))
+        const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : ''
+        const workspaces = ctx.get('workspaceController') as WorkspaceControllerLike | undefined
+        if (sessionId === '' || workspaces === undefined) {
+          sendJson(res, 400, { ok: false, error: '需要 sessionId，且部署要有 workspaceController' })
+          return
+        }
+        try {
+          // `stopActivity` 默认 true：探针会话往往正在跑一个回合，不先停就会被
+          // `workspace/session-active` 拒掉（M1 自检时实测过一次 500）。
+          await workspaces.archiveSession({ sessionId, stopActivity: body?.stopActivity !== false })
+          probe.sessions = probe.sessions.filter((id) => id !== sessionId)
+          trace.push({ kind: 'host:probe-archived', sessionId, note: '探针会话已归档' })
+          sendJson(res, 200, { ok: true, sessionId })
+        } catch (error) {
+          sendJson(res, 500, { ok: false, error: messageOf(error) })
+        }
+        return
+      }
+
+      sendJson(res, 404, { ok: false, error: `unknown cosplay route: ${method} ${path}` })
+    },
+  }
+}

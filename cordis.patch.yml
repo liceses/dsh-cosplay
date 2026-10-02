@@ -1,0 +1,10 @@
+# dsh-cosplay bundle patch：把本插件的条目插进 profile 的名册。
+# 作为一个 profile bundle 层（package.json 的 dsh.bundle.patch 字段）叠在 dsh-base 之上，
+# 用 `dsh plugin --profile web add link:<本包路径>`（桌面端走「设置 → 插件」）激活。
+#
+# 一个裸条目：宿主半边（exports["."]）跑在宿主进程里，管路由 / 提示段 / 改写钩子 / 命令；
+# 浏览器半边由同一条目的 dsh.client 声明（exports["./client"]）自动装配 —— 与
+# dsh-memes-reply 同款、已在本机 0.2.0-rc.1 上跑通。
+- insert:
+    - id: cosplay
+      name: 'dsh-cosplay'
