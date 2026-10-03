@@ -410,7 +410,7 @@ export function CosplayView(props: { sessionId?: unknown }): ReactElement {
               <div>
                 <div className="dsh-cosplay-card-title">本会话最近改写</div>
                 <div className="dsh-cosplay-hint" style={{ marginBottom: 4 }}>
-                  点「原文 ↔ 改写后」能对着看：改写只该动措辞，**不该换掉任务主体**（换会话也换不掉历史）。
+                  点「原文 ↔ 改写后」能对着看：改写只该动措辞，不该换掉任务主体（换会话也换不掉历史）。
                 </div>
                 <div className="dsh-cosplay-trace">
                   {(session.binding?.rewrites ?? []).map((item) => {

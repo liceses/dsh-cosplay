@@ -19,3 +19,10 @@ muscle-prompt-forge/
 .tmp-*
 
 # 注意：lib/ **不入这里** —— 构建产物是刻意入库的（git 安装免编译，见 README）
+
+# 介绍片：成片 34MB 不进仓库（`node video/render.mjs` 35 秒重出）；
+# subs.ass 与渲染命令是生成物同样忽略。字卡（cards/）与真机截帧（screen/）是源素材，**入库**
+video/*.mp4
+video/subs.ass
+video/last-render-cmd.txt
+__pycache__/
