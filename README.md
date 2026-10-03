@@ -230,6 +230,12 @@ node test/live-probe.mjs 19387
 
 ## 人设 × 上下文（实测 + 文献，不是感觉）
 
+> **两份配套文档**（2026-10）：
+> - [角色扮演 / 人设提示词的证据报告](docs/research-persona-prompting-2026-10.md) —— 14 条证据、按日期与可信度分级、
+>   明确标注"降权（时代性）"与"未精读"的条目、以及**上一轮设计的 4 处修正**（含一处方法学自我批评）；
+> - [角色卡写作与运维 · 行动指南](docs/playbook-persona-cards.md) —— 五段模板、预算、反模式表、
+>   7 张预设卡逐卡改造清单、锚点座位的 spike 判定规则、验证与回滚。
+
 这一节回答三个被真实问过的问题。数据来自本机真实会话日志（857 个会话全量扫描 + 逐轮统计），
 文献结论按可信度标注。
 
@@ -242,6 +248,8 @@ node test/live-probe.mjs 19387
 **位置与措辞的依据**（文献）：
 - [Lost in the Middle](https://arxiv.org/abs/2307.03172v3) + [Attention Sinks](https://arxiv.org/abs/2309.17453)：
   注意力呈 **U 型**（开头强、中间弱、结尾强）→ 人设段放在**最前**（`order=1`）已是最优位。
+  **注**：这两篇是 2023 年的，按本仓库的时代性政策**降权**（只取方向，不引数值）；
+  更接近当下的证据（2026）见证据报告里的 E1/E2/E3。
 - [Critical Instruction Repetition](https://raw.githubusercontent.com/agentpatterns-ai/website/main/instructions/critical-instruction-repetition.md)：
   关键约束"首尾各说一次"有效，但**只能一条、必须逐字**（换说法会被读成第二条冲突约束），
   且**推理模型收益明显更小** —— 所以我们只在末尾放**卡片自己的原话**，并且默认关。
