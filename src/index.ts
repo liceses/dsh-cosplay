@@ -60,8 +60,10 @@ function createStats(): CosplayStats {
   return {
     sectionCalls: 0,
     sectionFilled: 0,
+    sectionUnresolved: 0,
     preStepCalls: 0,
     preStepRewrote: 0,
+    preStepUnresolved: 0,
     rewrite: { calls: 0, ok: 0, failed: 0, cached: 0, lastMs: 0, lastModel: '' },
     durableUserMessages: 0,
   }

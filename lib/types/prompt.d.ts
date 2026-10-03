@@ -13,6 +13,10 @@
  *    覆盖位，全局层重复注册会抛错。我们的注入是**加法**，用 `dsh-cosplay:persona`。
  * 3. **位置紧跟部署人设之后**（`getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1`），
  *    早于 PLAN_POLICY(500) 等一切策略段 —— 身份先于人设先于纪律。
+ * 4. **会话身份走两条独立的路**（`agent.id` 与 `scope.id`，见 `AssemblyContextLike`）。
+ *    `agent` 是运行时多给的键、`scope` 是类型里声明过的键；只依赖一条的话，那条一变
+ *    人设就**静默全失效**。拿不到身份时还会写 `host:prompt-section-no-agent` 并计数
+ *    （`stats.sectionUnresolved`），让退化在界面上看得见。
  *
  * ## 装配上下文里的会话语份
  *
@@ -37,8 +41,19 @@ export interface PersonaSectionDeps {
      */
     compose: (sessionId: string | undefined, context: unknown) => string;
 }
-/** 从装配上下文里取会话 id；取不到返回 undefined（不强求）。 */
+/**
+ * 从装配上下文里取会话 id；取不到返回 undefined（不强求）。
+ *
+ * 走两条独立的路（见 `AssemblyContextLike` 的说明）：
+ *   1. `context.agent.id` —— 运行时多给的键，实测最好用；
+ *   2. `context.scope.id` —— **公开类型里声明过**的那个键（运行时与 agent 同对象）。
+ *
+ * 数字型 id 也接受（转成字符串）；空串一律当取不到（空串会让"本会话绑定"查不到东西，
+ * 却又能骗过 `?? undefined` 这类判断，属于最坏情况）。
+ */
 export declare function sessionIdOf(context: unknown): string | undefined;
+/** 诊断用：把装配上下文的身份字段读成一句可读的话。 */
+export declare function describeIdentity(context: unknown): string;
 /**
  * 注册人设段（系统提示词开头附近，紧跟身份）。
  * @returns disposer；宿主没挂 systemPrompt 服务时返回 undefined。

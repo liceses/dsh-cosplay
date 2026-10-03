@@ -12,7 +12,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { installPreStepHook, replaceUserText, sourceKindOf, textOfMessage } from '../lib/hook.js'
+import { installPreStepHook, preStepSessionIdOf, replaceUserText, sourceKindOf, textOfMessage } from '../lib/hook.js'
 import { createTrace } from '../lib/trace.js'
 
 /** 计数。 */
@@ -20,8 +20,10 @@ function stats() {
   return {
     sectionCalls: 0,
     sectionFilled: 0,
+    sectionUnresolved: 0,
     preStepCalls: 0,
     preStepRewrote: 0,
+    preStepUnresolved: 0,
     rewrite: { calls: 0, ok: 0, failed: 0, cached: 0, lastMs: 0, lastModel: '' },
     durableUserMessages: 0,
   }
@@ -77,8 +79,10 @@ function harness({ cards = [card()], binding, rewrite, cfg = config(), probe = {
       return cards.find((candidate) => candidate.id === id)
     },
   }
+  const asked = []
   const store = {
-    binding() {
+    binding(sessionId) {
+      asked.push(sessionId)
       return binding
     },
     recordRewrite(sessionId, record) {
@@ -99,6 +103,8 @@ function harness({ cards = [card()], binding, rewrite, cfg = config(), probe = {
     stats: counters,
     records,
     probe,
+    /** 钩子问过哪些 sessionId（用来验证身份解析的兜底真的生效）。 */
+    asked,
     /** 跑一次钩子。 */
     async run(payload, next) {
       return listener(payload, next)
@@ -241,4 +247,37 @@ test('探针路径：武装 + 带标记才动手（M0 自检保留）', async ()
   const h2 = harness({ probe: { armed: false, touched: new Set(), sessions: [] }, binding: undefined })
   const untouched = await h2.run({ agent: { id: 's1' }, messages: [marked], turn: 1, step: 1, signal: new AbortController().signal }, defaultNext([marked]))
   assert.equal(textOfMessage(untouched.messages[0]), 'cosplay-probe-marker 你好')
+})
+
+/* ─────────────── 会话身份：两条独立的路 + 静默退化探针 ─────────────── */
+
+test('preStepSessionIdOf：agent.id 优先、agent.session.id 兜底、header 再兜底', () => {
+  assert.equal(preStepSessionIdOf({ agent: { id: 's1' } }), 's1')
+  assert.equal(preStepSessionIdOf({ agent: { session: { id: 's2' } } }), 's2')
+  assert.equal(preStepSessionIdOf({ agent: { session: { header: { id: 's3' } } } }), 's3')
+  assert.equal(preStepSessionIdOf({ agent: { id: 's1', session: { id: 's2' } } }), 's1', 'agent.id 优先')
+  assert.equal(preStepSessionIdOf({ agent: {} }), undefined)
+  assert.equal(preStepSessionIdOf({}), undefined)
+})
+
+test('载荷缺会话身份 → 不改写、原文放行、留痕、计数（静默退化探针）', async () => {
+  const h = harness({ binding: { cardId: 'hardcore', enabled: true } })
+  const payload = { agent: {}, messages: [message()], turn: 1, step: 1, signal: new AbortController().signal }
+  const decision = await h.run(payload, defaultNext([message()]))
+  assert.equal(decision.kind, 'enter')
+  assert.equal(textOfMessage(decision.messages[0]), '画一张秦始皇骑北极熊', '原文必须原样放行')
+  assert.equal(h.stats.preStepRewrote, 0)
+  assert.equal(h.stats.preStepUnresolved, 1)
+  const warned = h.trace.list().filter((entry) => entry.kind === 'host:pre-step-no-agent')
+  assert.equal(warned.length, 1)
+  assert.match(warned[0].note, /取不到会话身份/)
+})
+
+test('agent.id 缺失但有 agent.session.id → 兜底生效，仍按该会话绑定改写', async () => {
+  const h = harness({ binding: { cardId: 'hardcore', enabled: true } })
+  const payload = { agent: { session: { id: 's-fallback' } }, messages: [message()], turn: 1, step: 1, signal: new AbortController().signal }
+  const decision = await h.run(payload, defaultNext([message()]))
+  assert.equal(textOfMessage(decision.messages[0]), '老哥们，搞快点！', '兜底解析出的会话必须真的被用来查绑定')
+  assert.deepEqual(h.asked, ['s-fallback'])
+  assert.equal(h.stats.preStepUnresolved, 0, '兜底成功不算退化')
 })

@@ -155,6 +155,13 @@ export function CosplaySettings({ scope }: SettingsProps): ReactElement {
           <dd>
             提示段求值 {stats?.sectionCalls ?? '—'} 次 · 产出正文 {stats?.sectionFilled ?? '—'} 次
           </dd>
+          <dt>身份探针</dt>
+          <dd className={(stats?.sectionUnresolved ?? 0) + (stats?.preStepUnresolved ?? 0) > 0 ? 'dsh-cosplay-error' : undefined}>
+            取不到会话身份：提示段 {stats?.sectionUnresolved ?? '—'} 次 · pre-step {stats?.preStepUnresolved ?? '—'} 次
+            {(stats?.sectionUnresolved ?? 0) + (stats?.preStepUnresolved ?? 0) > 0
+              ? '（应恒为 0；>0 说明 DSH 改了装配上下文/载荷形状，角色会静默失效）'
+              : '（应恒为 0）'}
+          </dd>
           <dt>改写链路</dt>
           <dd>
             pre-step 调用 {stats?.preStepCalls ?? '—'} 次 · 改写 {stats?.preStepRewrote ?? '—'} 次 · durable 用户消息{' '}

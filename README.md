@@ -224,6 +224,18 @@ curl "http://127.0.0.1:19387/api/dsh-cosplay/diagnostics?sessionId=<id>"
 node test/live-probe.mjs 19387
 ```
 
+**身份探针（`sectionUnresolved` / `preStepUnresolved`，应恒为 0）**：本插件的角色是**按会话**解析的，
+而"会话身份"来自装配上下文与 pre-step 载荷里的运行时对象 —— 那些形状**不在插件契约里**。
+一旦 DSH 改了它们，症状会是「所有会话突然都没角色」而且**不报错**。所以：
+
+- 解析走**两条独立的路**：`agent.id` 优先，`scope.id` 兜底
+  （实测 `assembleContextFor()` 返回 `{ agent, scope: agent, … }`，两个键指向同一 agent；
+  `scope` 是 `AssembleContext` 里**声明过**的字段，`agent` 是运行时多给的）；
+- pre-step 侧同样两条：`agent.id` → `agent.session.id` → `session.header.id`；
+- 两条都取不到时：**本次不注入/不改写**，写一条 `host:prompt-section-no-agent`（或
+  `host:pre-step-no-agent`）回执，并把计数累加到上面两个字段里 —— 界面上「设置 → 角色扮演 →
+  链路计数 → 身份探针」会变红。**看到它 > 0 就是"该升级适配了"，不是玄学。**
+
 「设置 → 角色扮演」页把同一份数据画在你面前（计数 + 诊断流）。
 
 ---

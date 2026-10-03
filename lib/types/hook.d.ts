@@ -41,6 +41,24 @@ import type { Library } from './library.js';
 import type { StateStore } from './state.js';
 import type { RewriteResult } from './rewrite.js';
 import type { CosplayCard, CosplayStats, TraceEntry } from './types.js';
+/**
+ * 从 pre-step 载荷里取会话身份；两条独立的路（`agent.id` 与 `agent.session.id`）。
+ *
+ * 为什么两条都要试：载荷的 `agent` 是运行时对象，它的形状不在插件契约里；
+ * 而 `agent.session` 是官方 surface 读取的入口（我们已经在用它读历史），
+ * 会话 id 在它的 header 上。只依赖一条的话，那条一变改写就静默失效。
+ */
+export declare function preStepSessionIdOf(payload: {
+    agent?: {
+        id?: unknown;
+        session?: {
+            id?: unknown;
+            header?: {
+                id?: unknown;
+            };
+        };
+    };
+}): string | undefined;
 /** 把一条消息里的文本块拼起来。 */
 export declare function textOfMessage(message: {
     content?: readonly ContentBlock[];

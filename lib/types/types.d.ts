@@ -187,10 +187,20 @@ export interface CosplayStats {
     sectionCalls: number;
     /** 提示段真正产出正文的次数（≠0 才说明有注入）。 */
     sectionFilled: number;
+    /**
+     * 提示段求值时**取不到会话 id** 的次数。
+     *
+     * 这是"静默退化"的探针：我们的人设是**按会话**解析的，一旦装配上下文不再提供
+     * 会话身份，症状是"所有会话突然都没有角色"、而且**不报错**。所以这里必须计数，
+     * 界面上也应显示成"应恒为 0"。
+     */
+    sectionUnresolved: number;
     /** pre-step 钩子被调用的次数。 */
     preStepCalls: number;
     /** 其中真正改写了消息的次数。 */
     preStepRewrote: number;
+    /** pre-step 载荷里**取不到会话身份**的次数（与 `sectionUnresolved` 同一类"静默退化"探针）。 */
+    preStepUnresolved: number;
     /** 模型改写：调用 / 成功 / 失败 / 缓存命中。 */
     rewrite: {
         calls: number;

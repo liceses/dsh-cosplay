@@ -13,7 +13,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { echoTextOf, normalizeCard } from '../lib/cards.js'
-import { composeEchoText, composePersonaText, composeRewriteSystem, registerEchoSection, registerPersonaSection } from '../lib/prompt.js'
+import {
+  composeEchoText,
+  composePersonaText,
+  composeRewriteSystem,
+  describeIdentity,
+  registerEchoSection,
+  registerPersonaSection,
+  sessionIdOf,
+} from '../lib/prompt.js'
 import { createTrace } from '../lib/trace.js'
 
 /** 一张人设卡。 */
@@ -99,7 +107,7 @@ function ctxOf(service) {
 
 test('段注册：人设段在前（order=1）、回声段在真末尾（order=10201）、都用独立段名', () => {
   const a = registrar()
-  const deps = { trace: createTrace(20), stats: { sectionCalls: 0, sectionFilled: 0 }, compose: () => 'x' }
+  const deps = { trace: createTrace(20), stats: { sectionCalls: 0, sectionFilled: 0, sectionUnresolved: 0 }, compose: () => 'x' }
   registerPersonaSection(ctxOf(a.service), deps)
   registerEchoSection(ctxOf(a.service), deps)
 
@@ -116,16 +124,61 @@ test('段注册：人设段在前（order=1）、回声段在真末尾（order=1
 })
 
 test('段注册：宿主没有 systemPrompt 服务时安静返回 undefined', () => {
-  const deps = { trace: createTrace(5), stats: { sectionCalls: 0, sectionFilled: 0 }, compose: () => 'x' }
+  const deps = { trace: createTrace(5), stats: { sectionCalls: 0, sectionFilled: 0, sectionUnresolved: 0 }, compose: () => 'x' }
   assert.equal(registerPersonaSection({ get: () => undefined }, deps), undefined)
   assert.equal(registerEchoSection({ get: () => undefined }, deps), undefined)
 })
 
 test('回声段求值：没绑卡（compose 返回空）时不占正文', () => {
   const r = registrar()
-  const deps = { trace: createTrace(5), stats: { sectionCalls: 0, sectionFilled: 0 }, compose: () => '' }
+  const deps = { trace: createTrace(5), stats: { sectionCalls: 0, sectionFilled: 0, sectionUnresolved: 0 }, compose: () => '' }
   registerEchoSection(ctxOf(r.service), deps)
   assert.equal(r.sections[0].text({ agent: { id: 's1' } }), '')
+})
+
+/* ─────────────── 会话身份：两条独立的路 + 静默退化探针 ─────────────── */
+
+test('会话身份：agent.id 优先、scope.id 兜底（两条独立的路）', () => {
+  assert.equal(sessionIdOf({ agent: { id: 's1' } }), 's1')
+  // ★ 这条是关键：`agent` 是**运行时多给**的键（不在 AssembleContext 的公开类型里），
+  //   而 `scope` 是**声明过**的键 —— 只给 scope 时也必须解析出会话 id，否则人设会静默失效。
+  assert.equal(sessionIdOf({ scope: { id: 's1' } }), 's1')
+  assert.equal(sessionIdOf({ agent: { id: 'a' }, scope: { id: 'b' } }), 'a', 'agent 优先')
+  assert.equal(sessionIdOf({ agent: {}, scope: { id: 42 } }), '42', '数字型 id 接受（转字符串）')
+  assert.equal(sessionIdOf({ agent: { id: '' } }), undefined, '空串一律当取不到（最坏情况：能骗过 ?? 判断）')
+  assert.equal(sessionIdOf({ agent: {}, scope: {} }), undefined)
+  assert.equal(sessionIdOf({}), undefined)
+  assert.equal(sessionIdOf(undefined), undefined)
+})
+
+test('静默退化探针：身份取不到 → 不注入 + 留痕 + 计数；有身份时不误报', () => {
+  const r = registrar()
+  const trace = createTrace(40)
+  const stats = { sectionCalls: 0, sectionFilled: 0, sectionUnresolved: 0 }
+  registerPersonaSection(ctxOf(r.service), { trace, stats, compose: () => '注入正文' })
+  const section = r.sections[0]
+
+  // ① 身份缺失：不注入、留一条能指向病因的回执、计数 +1
+  assert.equal(section.text({}), '', '拿不到身份就不注入（宁可零 token，也不猜一个会话）')
+  assert.equal(stats.sectionUnresolved, 1)
+  assert.equal(stats.sectionFilled, 0)
+  const warned = trace.list().filter((entry) => entry.kind === 'host:prompt-section-no-agent')
+  assert.equal(warned.length, 1)
+  assert.match(warned[0].note, /取不到会话身份/)
+  assert.match(warned[0].note, /keys=\[\]/, '回执里要能看出上下文长什么样')
+
+  // ② 有身份（哪怕只给 scope）：正常注入、不再计数
+  assert.equal(section.text({ scope: { id: 's1' } }), '注入正文')
+  assert.equal(stats.sectionFilled, 1)
+  assert.equal(stats.sectionUnresolved, 1, '成功解析不算退化')
+})
+
+test('describeIdentity：能一眼看出是哪个键坏了', () => {
+  const text = describeIdentity({ agent: {}, scope: { id: 'abc' } })
+  assert.match(text, /keys=\[agent,scope\]/)
+  assert.match(text, /agent\.id=undefined/)
+  assert.match(text, /scope\.id=string\(abc\)/)
+  assert.match(describeIdentity({ agent: { id: '' } }), /agent\.id=空串/)
 })
 
 test('改写 system：卡片原词逐字在内 + 指代纪律在内', () => {

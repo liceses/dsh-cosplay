@@ -13,6 +13,10 @@
  *    覆盖位，全局层重复注册会抛错。我们的注入是**加法**，用 `dsh-cosplay:persona`。
  * 3. **位置紧跟部署人设之后**（`getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 1`），
  *    早于 PLAN_POLICY(500) 等一切策略段 —— 身份先于人设先于纪律。
+ * 4. **会话身份走两条独立的路**（`agent.id` 与 `scope.id`，见 `AssemblyContextLike`）。
+ *    `agent` 是运行时多给的键、`scope` 是类型里声明过的键；只依赖一条的话，那条一变
+ *    人设就**静默全失效**。拿不到身份时还会写 `host:prompt-section-no-agent` 并计数
+ *    （`stats.sectionUnresolved`），让退化在界面上看得见。
  *
  * ## 装配上下文里的会话语份
  *
@@ -40,11 +44,26 @@ interface PromptSectionRegistrar {
   getSectionOrder(name: string): number
 }
 
-/** 装配上下文里我们用到的那两个字段。 */
+/**
+ * 装配上下文里我们用到的那两个字段。
+ *
+ * **为什么两个都声明**：`dsh-agent` 的 `assembleContextFor(agent, signal)` 返回的是
+ * `{ agent, scope: agent, … }` —— 两个**独立的键**指向同一个 agent 对象。而
+ * `AssembleContext` 的公开类型里**只声明了 `scope`**，`agent` 是运行时多给的。
+ * 所以读会话身份走两条路：`agent.id` 优先、`scope.id` 兜底。
+ * （这条兜底不是洁癖：单点依赖那个未声明字段的话，一旦 DSH 不再传 `agent`，
+ * 症状是"所有会话突然都没角色"，而且**不报错**。）
+ */
 interface AssemblyContextLike {
   agent?: { id?: unknown }
-  scope?: unknown
+  scope?: { id?: unknown }
 }
+
+/** 取不到会话身份时，最多报几次（之后按步长抽样报，别刷爆环形缓冲）。 */
+const NO_AGENT_REPORT_LIMIT = 3
+
+/** 取不到会话身份时的抽样上报步长。 */
+const NO_AGENT_REPORT_STEP = 50
 
 /** 取不到 `DEPLOYMENT_PERSONA_PREFIX` 锚点时的兜底顺序（= 0 + 1）。 */
 const FALLBACK_ORDER = 1
@@ -71,10 +90,40 @@ export interface PersonaSectionDeps {
   compose: (sessionId: string | undefined, context: unknown) => string
 }
 
-/** 从装配上下文里取会话 id；取不到返回 undefined（不强求）。 */
+/**
+ * 从装配上下文里取会话 id；取不到返回 undefined（不强求）。
+ *
+ * 走两条独立的路（见 `AssemblyContextLike` 的说明）：
+ *   1. `context.agent.id` —— 运行时多给的键，实测最好用；
+ *   2. `context.scope.id` —— **公开类型里声明过**的那个键（运行时与 agent 同对象）。
+ *
+ * 数字型 id 也接受（转成字符串）；空串一律当取不到（空串会让"本会话绑定"查不到东西，
+ * 却又能骗过 `?? undefined` 这类判断，属于最坏情况）。
+ */
 export function sessionIdOf(context: unknown): string | undefined {
-  const id = (context as AssemblyContextLike | null | undefined)?.agent?.id
-  return id === undefined ? undefined : String(id)
+  const value = context as AssemblyContextLike | null | undefined
+  for (const candidate of [value?.agent, value?.scope]) {
+    const id = candidate?.id
+    if (typeof id === 'string') {
+      if (id !== '') return id
+      continue
+    }
+    if (typeof id === 'number' && Number.isFinite(id)) return String(id)
+  }
+  return undefined
+}
+
+/** 诊断用：把装配上下文的身份字段读成一句可读的话。 */
+export function describeIdentity(context: unknown): string {
+  const value = context as AssemblyContextLike | null | undefined
+  const shape = (slot: { id?: unknown } | undefined): string => {
+    if (slot === undefined) return '缺失'
+    const type = typeof slot.id
+    if (type === 'string') return (slot.id as string) === '' ? '空串' : `string(${(slot.id as string).slice(-12)})`
+    return type
+  }
+  const keys = Object.keys((context ?? {}) as Record<string, unknown>).sort().join(',')
+  return `keys=[${keys}] agent.id=${shape(value?.agent)} scope.id=${shape(value?.scope)}`
 }
 
 /**
@@ -109,6 +158,10 @@ function registerSection(
   }
 
   const seenAgents = new Set<string>()
+  /** 取不到会话身份的累计次数（静默退化的探针）。 */
+  let unresolved = 0
+  /** 已经上报过几次"取不到身份"。 */
+  let unresolvedReported = 0
 
   return prompts.section({
     name: options.name,
@@ -119,18 +172,33 @@ function registerSection(
       if (options.countStats) deps.stats.sectionCalls += 1
       try {
         const sessionId = sessionIdOf(context)
-        // 观测：前几个不同会话各报一次，附带"装配上下文到底长什么样"。
-        const mark = sessionId ?? '(无会话)'
-        if (!seenAgents.has(mark) && seenAgents.size < AGENT_REPORT_LIMIT) {
-          seenAgents.add(mark)
+
+        // ① 静默退化探针：拿不到会话身份 = 人设按会话解析这条路断了。
+        //    以前这里会安静地返回空串（"所有会话突然没角色"且不报错），现在必须留痕 + 计数。
+        if (sessionId === undefined) {
+          unresolved += 1
+          deps.stats.sectionUnresolved += 1
+          if (unresolvedReported < NO_AGENT_REPORT_LIMIT || unresolved % NO_AGENT_REPORT_STEP === 0) {
+            unresolvedReported += 1
+            deps.trace.push({
+              kind: 'host:prompt-section-no-agent',
+              note:
+                `装配上下文里取不到会话身份（第 ${unresolved} 次）：本次不注入角色。` +
+                `${describeIdentity(context)} —— 若持续出现，说明 DSH 改了装配上下文的形状，` +
+                `人设会静默失效（插件本身不报错）。`,
+            })
+          }
+          // 拿不到身份就不注入（宁可零 token，也不猜一个会话）。
+          return ''
+        }
+
+        // ② 观测：前几个不同会话各报一次，附带"装配上下文到底长什么样"。
+        if (!seenAgents.has(sessionId) && seenAgents.size < AGENT_REPORT_LIMIT) {
+          seenAgents.add(sessionId)
           deps.trace.push({
             kind: options.reportKind,
-            ...(sessionId === undefined ? {} : { sessionId }),
-            note:
-              `section=${options.name} order=${order} ` +
-              `agentId=${sessionId ?? 'undefined'} typeof=${typeof (context as AssemblyContextLike | undefined)?.agent?.id} ` +
-              `scope=${(context as AssemblyContextLike | undefined)?.scope === undefined ? 'undefined' : 'present'} ` +
-              `keys=[${Object.keys((context ?? {}) as Record<string, unknown>).sort().join(',')}]`,
+            sessionId,
+            note: `section=${options.name} order=${order} ${describeIdentity(context)}`,
           })
         }
         const text = deps.compose(sessionId, context)

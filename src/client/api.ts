@@ -173,8 +173,12 @@ export interface StatsResponse {
   stats: {
     sectionCalls: number
     sectionFilled: number
+    /** 取不到会话身份的次数（应恒为 0；>0 = 静默退化）。 */
+    sectionUnresolved: number
     preStepCalls: number
     preStepRewrote: number
+    /** pre-step 载荷里取不到会话身份的次数（应恒为 0）。 */
+    preStepUnresolved: number
     durableUserMessages: number
     rewrite: { calls: number; ok: number; failed: number; cached: number; lastMs: number; lastModel: string }
   }

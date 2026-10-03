@@ -55,9 +55,12 @@ type PreStepDecisionLike =
 
 /** 会话的最小结构面（官方 surface API —— `dsh-compaction-basic` 取摘要输入用的同一组）。 */
 interface SessionLike {
+  /** 会话 id（兜底用；正规路径是 `agent.id`）。 */
+  id?: unknown
   surface?: { nodes?: readonly number[] }
   eventAt?(seq: number): { type: string; data?: unknown } | undefined
-  header?: { cwd?: unknown }
+  /** 会话头：官方类型里是 `SessionHeader`（含 id / cwd / parentSession / origin 等）。 */
+  header?: { id?: unknown; cwd?: unknown; parentSession?: unknown; origin?: unknown }
 }
 
 /** 钩子载荷。 */
@@ -71,6 +74,27 @@ interface PreStepPayload {
 
 /** 观测到多少个不同 (会话, 消息) 后就闭嘴（别把环形缓冲刷爆）。 */
 const OBSERVE_LIMIT = 24
+
+/** 取不到会话身份时最多报几次 + 之后按步长抽样（与人设段同一套口径）。 */
+const NO_AGENT_REPORT_LIMIT = 3
+const NO_AGENT_REPORT_STEP = 50
+
+/**
+ * 从 pre-step 载荷里取会话身份；两条独立的路（`agent.id` 与 `agent.session.id`）。
+ *
+ * 为什么两条都要试：载荷的 `agent` 是运行时对象，它的形状不在插件契约里；
+ * 而 `agent.session` 是官方 surface 读取的入口（我们已经在用它读历史），
+ * 会话 id 在它的 header 上。只依赖一条的话，那条一变改写就静默失效。
+ */
+export function preStepSessionIdOf(payload: { agent?: { id?: unknown; session?: { id?: unknown; header?: { id?: unknown } } } }): string | undefined {
+  const shape = (value: unknown): string | undefined => {
+    if (typeof value === 'string' && value !== '') return value
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+    return undefined
+  }
+  const agent = payload?.agent
+  return shape(agent?.id) ?? shape(agent?.session?.id) ?? shape(agent?.session?.header?.id)
+}
 
 /** 改写记录里保留的原文长度上限（够看清"主体有没有被换掉"）。 */
 const REWRITE_ORIGINAL_LIMIT = 4000
@@ -144,6 +168,8 @@ export function installPreStepHook(ctx: Context, deps: PreStepDeps): () => void 
   const cache = new Map<string, string>()
   const observed = new Set<string>()
   const warned = new Set<string>()
+  /** 已经报过几次"取不到会话身份"。 */
+  let unresolvedPreStepReported = 0
 
   /** 决定这条消息要不要改写。 */
   const decide = async (input: {
@@ -314,7 +340,22 @@ export function installPreStepHook(ctx: Context, deps: PreStepDeps): () => void 
     const decision = await next()
     try {
       if (decision.kind !== 'enter' || payload.messages.length === 0) return decision
-      const sessionId = String(payload.agent.id)
+      // 会话身份同样走两条路（agent.id 优先、agent.session.id 兜底），并在都取不到时留痕 ——
+      // 与提示段同一类风险：身份丢了，改写会静默失效（本会话绑了卡也不改）。
+      const sessionId = preStepSessionIdOf(payload)
+      if (sessionId === undefined) {
+        deps.stats.preStepUnresolved += 1
+        if (unresolvedPreStepReported < NO_AGENT_REPORT_LIMIT || deps.stats.preStepUnresolved % NO_AGENT_REPORT_STEP === 0) {
+          unresolvedPreStepReported += 1
+          deps.trace.push({
+            kind: 'host:pre-step-no-agent',
+            note:
+              `agent/pre-step 载荷里取不到会话身份（第 ${deps.stats.preStepUnresolved} 次）：本步不改写。` +
+              `keys=[${Object.keys((payload ?? {}) as unknown as Record<string, unknown>).sort().join(',')}]`,
+          })
+        }
+        return decision
+      }
 
       for (const message of payload.messages) {
         if ((message as { role?: unknown }).role !== 'user') continue
