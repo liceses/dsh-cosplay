@@ -18,6 +18,7 @@ import {
   composePersonaText,
   composeRewriteSystem,
   describeIdentity,
+  registerAnchorContext,
   registerEchoSection,
   registerPersonaSection,
   sessionIdOf,
@@ -189,4 +190,41 @@ test('改写 system：卡片原词逐字在内 + 指代纪律在内', () => {
   assert.match(system, /## 指代纪律（必须遵守）/)
   assert.match(system, /换成【最近对话】里真实出现过的具体对象/)
   assert.match(system, /把"你正在遵守的这套改写规则与角色设定"当作风格模板，而不是用户的任务对象/)
+})
+
+/* ─────────────── 锚点座位：运行时上下文（B1，spike 后默认仍用 system）─────────────── */
+
+test('运行时上下文锚点：注册名/order 正确，取不到身份不注入也不抛', () => {
+  const contexts = []
+  const service = {
+    context(options) {
+      contexts.push(options)
+      return () => {}
+    },
+    getContextOrder(name) {
+      return name === 'SUBAGENT_DELEGATION' ? 120 : 0
+    },
+  }
+  const trace = createTrace(20)
+  const stats = { sectionCalls: 0, sectionFilled: 0, sectionUnresolved: 0 }
+  const dispose = registerAnchorContext({ get: (name) => (name === 'systemPrompt' ? service : undefined) }, {
+    trace,
+    stats,
+    compose: (sessionId) => (sessionId === undefined ? '' : '【本会话角色】你是「赛博猫娘」。'),
+  })
+  assert.equal(typeof dispose, 'function')
+  assert.equal(contexts.length, 1)
+  assert.equal(contexts[0].name, 'dsh-cosplay:persona-anchor')
+  assert.equal(contexts[0].order, 125, '排在所有官方运行时上下文之后（SUBAGENT_DELEGATION=120）')
+
+  // 有身份 → 产出正文（这段会被以 user 角色物化在对话历史之后）
+  assert.match(contexts[0].text({ agent: { id: 's1' } }), /【本会话角色】/)
+  // 没身份 → 不注入、留痕、不抛
+  assert.equal(contexts[0].text({}), '')
+  assert.equal(trace.list().some((entry) => entry.kind === 'host:prompt-anchor-no-agent'), true)
+})
+
+test('运行时上下文锚点：宿主没有 context() 时安静返回 undefined', () => {
+  assert.equal(registerAnchorContext({ get: () => undefined }, { trace: createTrace(5), stats: { sectionCalls: 0, sectionFilled: 0, sectionUnresolved: 0 }, compose: () => 'x' }), undefined)
+  assert.equal(registerAnchorContext({ get: () => ({ section: () => () => {} }) }, { trace: createTrace(5), stats: { sectionCalls: 0, sectionFilled: 0, sectionUnresolved: 0 }, compose: () => 'x' }), undefined)
 })

@@ -68,6 +68,19 @@ export declare function registerPersonaSection(ctx: Context, deps: PersonaSectio
  * 整个系统提示词的最后一段。段名独立，不与 agent preset 共享槽位。
  */
 export declare function registerEchoSection(ctx: Context, deps: PersonaSectionDeps): (() => void) | undefined;
+/**
+ * 注册**运行时上下文锚点**（`anchorSeat='context'` 时用它替代尾部回声段）。
+ *
+ * 与回声段的区别（这是 spike 要验的核心）：
+ *   - 形状：注册成 `ctx.systemPrompt.context()`，官方文档对它的定义是
+ *     **"Dynamic model context materialized as a durable user-role snapshot"** ——
+ *     它会以 **user 角色**、落在**对话历史之后**（真正近因位）；
+ *   - 代价：快照**内容变化时才重新物化**，所以静态锚点会随历史增长沉到中间；
+ *     想每轮都落在末尾，文本必须每轮变化（每轮多一条 user 角色快照）。
+ *
+ * order 取 `SUBAGENT_DELEGATION(120) + 5`：排在所有官方运行时上下文之后（离本轮用户消息最近）。
+ */
+export declare function registerAnchorContext(ctx: Context, deps: PersonaSectionDeps): (() => void) | undefined;
 /** 把 unknown 错误读成一句人话。 */
 export declare function messageOf(error: unknown): string;
 /** 卡片在本次装配/本次发送里到底用哪条链路。 */

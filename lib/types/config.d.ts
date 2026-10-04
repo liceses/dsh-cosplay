@@ -50,6 +50,16 @@ export interface CosplayConfig {
      */
     rewriteGuardUnresolved: boolean;
     /**
+     * 锚点（尾部回声）放在哪个座位：
+     * - `system`（默认）：系统提示词**末尾**的独立段（`order=10201`）。
+     *   注意：整个请求是 `system → 历史 → 本轮消息`，所以它仍然属于**最前面**；
+     * - `context`：注册成**运行时上下文**，以 user 角色落在**对话历史之后**（真正的近因位）。
+     *   代价：快照只在内容变化时重新物化，所以静态锚点会随历史增长沉到中间。
+     *
+     * 见 `docs/backlog.md` 的 B1 与判定的 spike 规则。
+     */
+    anchorSeat: 'system' | 'context';
+    /**
      * 是否在系统提示词**最末尾**再放一句角色的原话（"尾部回声"）。
      *
      * 默认**开**，依据是本项目自己的对照实验（`scripts/experiment-persona.mjs`，

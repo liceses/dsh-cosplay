@@ -29,10 +29,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { echoTextOf } from './cards.js'
-import { PROMPT_ECHO_SECTION, PROMPT_SECTION } from './protocol.js'
+import { PROMPT_ANCHOR_CONTEXT, PROMPT_ECHO_SECTION, PROMPT_SECTION } from './protocol.js'
 import type { CosplayCard, CosplayStats, TraceEntry } from './types.js'
 
-/** `systemPrompt.section()` 的最小结构面（避免为类型拉整个包的依赖）。 */
+/** `systemPrompt` 服务的两个最小结构面（段 / 运行时上下文）。 */
 interface PromptSectionRegistrar {
   section(section: {
     name: string
@@ -42,6 +42,12 @@ interface PromptSectionRegistrar {
     complete?: boolean
   }): () => void
   getSectionOrder(name: string): number
+}
+
+/** 运行时上下文（`ctx.systemPrompt.context`）的最小结构面。 */
+interface PromptContextRegistrar {
+  context(context: { name: string; order: number; text: string | ((context: unknown) => string) }): () => void
+  getContextOrder(name: string): number
 }
 
 /**
@@ -85,6 +91,9 @@ const FALLBACK_ORDER = 1
  * 所以 10201 落在**所有官方段之后** —— 这就是"真末尾"。
  */
 const ECHO_FALLBACK_ORDER = 10_201
+
+/** 取不到 `SUBAGENT_DELEGATION` 锚点时的兜底 order（= 120 + 5）。 */
+const ANCHOR_FALLBACK_ORDER = 125
 
 /** 记录多少个不同会话后就闭嘴（别把环形缓冲刷爆）。 */
 const AGENT_REPORT_LIMIT = 8
@@ -246,6 +255,62 @@ export function registerEchoSection(ctx: Context, deps: PersonaSectionDeps): (()
     { name: PROMPT_ECHO_SECTION, anchor: 'DEPLOYMENT_PERSONA_SUFFIX', fallback: ECHO_FALLBACK_ORDER, reportKind: 'host:prompt-echo', countStats: false },
     deps,
   )
+}
+
+/**
+ * 注册**运行时上下文锚点**（`anchorSeat='context'` 时用它替代尾部回声段）。
+ *
+ * 与回声段的区别（这是 spike 要验的核心）：
+ *   - 形状：注册成 `ctx.systemPrompt.context()`，官方文档对它的定义是
+ *     **"Dynamic model context materialized as a durable user-role snapshot"** ——
+ *     它会以 **user 角色**、落在**对话历史之后**（真正近因位）；
+ *   - 代价：快照**内容变化时才重新物化**，所以静态锚点会随历史增长沉到中间；
+ *     想每轮都落在末尾，文本必须每轮变化（每轮多一条 user 角色快照）。
+ *
+ * order 取 `SUBAGENT_DELEGATION(120) + 5`：排在所有官方运行时上下文之后（离本轮用户消息最近）。
+ */
+export function registerAnchorContext(ctx: Context, deps: PersonaSectionDeps): (() => void) | undefined {
+  const prompts = ctx.get('systemPrompt') as PromptContextRegistrar | undefined
+  if (prompts === undefined || typeof prompts.context !== 'function') return undefined
+
+  let order = ANCHOR_FALLBACK_ORDER
+  try {
+    const anchor = prompts.getContextOrder('SUBAGENT_DELEGATION')
+    if (typeof anchor === 'number' && Number.isFinite(anchor)) order = anchor + 5
+  } catch {
+    // 锚点名字变了：退回兜底顺序。
+  }
+
+  const seen = new Set<string>()
+  return prompts.context({
+    name: PROMPT_ANCHOR_CONTEXT,
+    order,
+    text: (context: unknown): string => {
+      try {
+        const sessionId = sessionIdOf(context)
+        if (sessionId === undefined) {
+          deps.trace.push({
+            kind: 'host:prompt-anchor-no-agent',
+            note: `运行时上下文锚点取不到会话身份：本次不注入。${describeIdentity(context)}`,
+          })
+          return ''
+        }
+        const text = deps.compose(sessionId, context)
+        if (text !== '' && !seen.has(sessionId) && seen.size < AGENT_REPORT_LIMIT) {
+          seen.add(sessionId)
+          deps.trace.push({
+            kind: 'host:prompt-anchor',
+            sessionId,
+            note: `运行时上下文锚点 order=${order} ${text.length} 字（落在对话历史之后）`,
+          })
+        }
+        return text
+      } catch (error) {
+        deps.trace.push({ kind: 'host:prompt-anchor-error', note: `运行时上下文锚点抛错（已吞）：${messageOf(error)}` })
+        return ''
+      }
+    },
+  })
 }
 
 /** 把 unknown 错误读成一句人话。 */

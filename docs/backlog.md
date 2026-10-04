@@ -9,17 +9,18 @@
 
 ## 1. 已规划、有依据、未开工（建议按此顺序）
 
-### B1 · 锚点座位升级（方案 B：运行时上下文；C：长会话每 ~20 轮一次）
+### B1 · 锚点座位 —— spike 已跑完，结论：**静态 context 版 no-go**（2026-10-03）
 
 | 项 | 内容 |
 |---|---|
-| **为什么** | E1（ContextEcho）· E4（DeepSeek-V4 实操文档）· E5（社区规格）· E7 四处独立证据都指向：**"对话历史之后"才是真正的近因位**。我们现在的 `personaEcho` 坐在**系统提示词末尾**，而请求顺序是 `system → 历史 → 本轮消息` —— 系统末尾仍在最前 |
-| **现状** | 方案 A 已上线（无害、轻微有效）；B/C **未开工** |
-| **做法** | B：`ctx.systemPrompt.context({ name, order: SUBAGENT_DELEGATION(120)+1, text })`；C：只在会话超过 N 轮后、每 ~20 轮放一次（文本含轮次号 → 保证被重放） |
-| **必须先做 spike** | ① 位置是否真的落在最后一条历史之后；② 「对话」视图**是否把锚点渲染成可见消息**（若是 → no-go）；③ A vs B 三轮对照盲评不低于 A。**三条全过才采用** |
-| **成本** | 小（一次 spike + 一个 `anchorSeat: 'system' \| 'context'` 开关） |
-| **依赖** | 无（`ctx.systemPrompt.context` 与 `ctx.suppressRuntimeContext` 都是已声明的官方 API） |
-| **依据** | [playbook §4.2](playbook-persona-cards.md) · 研究报告 R3 |
+| **为什么** | E1（ContextEcho）· E4（DeepSeek-V4 实操文档）· E5（社区规格）· E7 四处独立证据都指向：**"对话历史之后"才是真正的近因位**；而请求顺序是 `system → 历史 → 本轮消息`，所以系统提示词末尾仍属**最前面** |
+| **已做** | 实现了 `anchorSeat: 'system' \| 'context'`（默认 `system` = 现状）+ `registerAnchorContext()`；`context` 座位注册为 `ctx.systemPrompt.context()`，官方定义是 **"Dynamic model context materialized as a durable user-role snapshot"** |
+| **spike 实测**（lab，3 轮，绑猫娘，真模型） | `seq=8 HUMAN#1` → **`seq=10 RUNTIME-CONTEXT（含锚点，511 字）`** → `seq=26 HUMAN#2` → `seq=35 HUMAN#3`。<br>**位置在第 1 轮正确**（确实落在人话之后、且系统提示词里不再有锚点）；<br>**但它只物化一次**（3 轮里 runtime-context 事件数 = **1**）—— 到第 3 轮已经沉到历史中间 |
+| **预登记判定** | ① "始终在最后一条历史之后" → **不满足** → 按规则 **静态 context 版 no-go**；② "对话视图是否可见" → **未确证**：`dsh-client-ui-conversation` 的 bundle 里**没有** `runtime-context` 特判（只有 `source.kind === 'user'` + rpcId 去重），而且一条长会话的「对话」正文看起来是干净的；没有做更严格的可见性验证 |
+| **保留下来的两个候选（都默认不做）** | **C · 周期版**：让锚点文本每 N 轮变化一次（例如带一个桶号），强制重新物化 → 位置正确，代价是每 N 轮多一条 user 角色快照（轨迹/日志可见，对话视图可见性未确证）。<br>**D · 用户消息后缀**：pre-step 本来就能改用户消息文本 → 把锚点作为后缀拼上，真近因位、不新增消息；代价是"你的原话"被附加内容（对在意原话保真的人是倒退） |
+| **建议** | 保持 `anchorSeat: 'system'`。理由：我们的角色会话实测都很短（最长 4 轮），而漂移是**长程**现象（E1/E2：>100 轮才明显）；在短会话里系统末尾与历史末尾的差别可忽略，而 C/D 的代价是每轮/每 N 轮的真实副作用。等真出现长程漂移的实际案例再启用 C |
+| **依据** | 实测（2026-10-03，lab 真机 + 真模型）· [playbook §4.2](playbook-persona-cards.md) · 研究报告 R3 |
+
 
 ### B2 · 多评审对照实验（旧预设 vs 新预设）
 

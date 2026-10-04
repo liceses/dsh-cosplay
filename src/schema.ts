@@ -78,6 +78,10 @@ export const Config = Schema.object({
     .default(DEFAULT_CONFIG.rewriteGuardUnresolved)
     .description('原文含"这个/它/上一轮"这类指代、但拿不到上下文时，跳过改写并原样放行（默认开）')
     .volatile(),
+  anchorSeat: Schema.union([Schema.const('system' as const), Schema.const('context' as const)])
+    .default(DEFAULT_CONFIG.anchorSeat)
+    .description('锚点座位：system = 系统提示词末尾（默认）；context = 运行时上下文（落在对话历史之后，真正的近因位，但静态锚点会随历史沉底）')
+    .volatile(),
   personaEcho: Schema.boolean()
     .default(DEFAULT_CONFIG.personaEcho)
     .description('在系统提示词最末尾再放一句角色原话（"尾部回声"）。默认开：本项目对照实验里它让人设标记密度 0.91→1.16/百字、独立评审 10→17 分，代价约 +40 字/请求')

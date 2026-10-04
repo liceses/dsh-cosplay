@@ -31,7 +31,7 @@ import { installPreStepHook } from './hook.js'
 import { createLibrary, resolveLibraryPaths, type Library } from './library.js'
 import { installDurableObserver } from './observe.js'
 import { PACKAGE_NAME } from './protocol.js'
-import { composeEchoText, composePersonaText, modeIncludes, registerEchoSection, registerPersonaSection, sessionOf } from './prompt.js'
+import { composeEchoText, composePersonaText, modeIncludes, registerAnchorContext, registerEchoSection, registerPersonaSection, sessionOf } from './prompt.js'
 import { createCosplayRoute, type ProbeRuntime } from './route.js'
 import { createRewriter } from './rewrite.js'
 import { Config, resolveLive, type LiveConfig } from './schema.js'
@@ -193,37 +193,41 @@ export function apply(ctx: Context, live: LiveConfig): void {
     'dsh-cosplay: persona section',
   )
 
-  // 3) 尾部回声段（可选，`personaEcho`）：把角色的**原话**放到系统提示词最末尾。
+  // 3) 锚点（可选，`personaEcho`）：把角色的**原话**放到锚点位。座位由 `anchorSeat` 决定：
+  //      - 'system'（默认）→ 独立系统段，落在系统提示词末尾（仍在整个请求的最前面）；
+  //      - 'context'        → 注册成运行时上下文，以 user 角色落在**对话历史之后**（真近因位）。
   //    只用卡片自己的文字（`tailLine`，否则逐字取人设第一句），插件绝不自己造句 ——
   //    造句会变成通用系统腔，还会和开头那句对不上（换说法 = 被读成第二条冲突约束）。
   const echoReported = new Set<string>()
-  ctx.effect(
-    () =>
-      registerEchoSection(ctx, {
-        trace,
-        stats,
-        compose: (sessionId, context) => {
-          const cfg = readConfig()
-          if (!cfg.enabled || !cfg.personaEcho || sessionId === undefined) return ''
-          const card = resolveForAssembly(sessionId, context)
-          if (card === undefined) return ''
-          if (!modeIncludes(card, cfg.strategy, 'system')) return ''
-          const text = composeEchoText(card)
-          const mark = `${sessionId}:${card.id}`
-          if (text !== '' && !echoReported.has(mark) && echoReported.size < 32) {
-            echoReported.add(mark)
-            trace.push({
-              kind: 'host:persona-echo',
-              sessionId,
-              id: card.id,
-              note: `尾部回声 ${text.length} 字（放在系统提示词末尾）`,
-            })
-          }
-          return text
-        },
-      }) ?? (() => {}),
-    'dsh-cosplay: echo section',
-  )
+  const echoCompose = (sessionId: string, context: unknown): string => {
+    const cfg = readConfig()
+    if (!cfg.enabled || !cfg.personaEcho) return ''
+    const card = resolveForAssembly(sessionId, context)
+    if (card === undefined) return ''
+    if (!modeIncludes(card, cfg.strategy, 'system')) return ''
+    const text = composeEchoText(card)
+    const mark = `${sessionId}:${card.id}`
+    if (text !== '' && !echoReported.has(mark) && echoReported.size < 32) {
+      echoReported.add(mark)
+      trace.push({
+        kind: 'host:persona-echo',
+        sessionId,
+        id: card.id,
+        note: `锚点 ${text.length} 字（座位=${cfg.anchorSeat}）`,
+      })
+    }
+    return text
+  }
+  ctx.effect(() => {
+    const deps = {
+      trace,
+      stats,
+      compose: (sessionId: string | undefined, context: unknown) =>
+        sessionId === undefined ? '' : echoCompose(sessionId, context),
+    }
+    if (readConfig().anchorSeat === 'context') return registerAnchorContext(ctx, deps) ?? (() => {})
+    return registerEchoSection(ctx, deps) ?? (() => {})
+  }, 'dsh-cosplay: anchor (echo section / runtime context)')
 
   // 4) 改写链路（`agent/pre-step`）
   ctx.effect(

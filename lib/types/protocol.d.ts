@@ -62,6 +62,18 @@ export declare const PROMPT_SECTION = "dsh-cosplay:persona";
  * 被 shadow 掉我们的回声会静默失效。order 取 `DEPLOYMENT_PERSONA_SUFFIX + 1`（真末尾）。
  */
 export declare const PROMPT_ECHO_SECTION = "dsh-cosplay:persona-echo";
+/**
+ * 锚点放在**运行时上下文**时用的注册名（`anchorSeat='context'` 才用）。
+ *
+ * 依据：`dsh-system-prompt` 对运行时上下文的定义是
+ * **"Dynamic model context materialized as a durable user-role snapshot"** ——
+ * 它以 user 角色、在**对话历史之后**落进请求，这正是 ContextEcho（E1）与社区规格（E5）
+ * 都推荐的"近因位"；而系统提示词末尾（`PROMPT_ECHO_SECTION`）在整个请求里仍属**最前面**。
+ *
+ * 代价与限制（spike 要验的）：快照**内容变化时才重新物化**，所以静态锚点会随历史增长沉到中间；
+ * 真要每轮都在末尾，锚点文本必须每轮变化（代价是每轮多一条 user 角色快照）。
+ */
+export declare const PROMPT_ANCHOR_CONTEXT = "dsh-cosplay:persona-anchor";
 /** 探针标记：只有带这个标记的用户消息才会被 M0 探针改写（绝不碰真实对话）。 */
 export declare const PROBE_MARKER = "cosplay-probe-marker";
 /** 探针改写后的前缀（用来在会话日志里一眼认出这是探针产物）。 */
