@@ -38,7 +38,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock, UserMessage } from '@deepseek-ai/dsh-llm/types'
 import type {} from '@deepseek-ai/dsh-agent'
 import type { CosplayConfig } from './config.js'
-import { effectiveCardId } from './bindings.js'
+import { resolveCardId, sessionMetaOf } from './bindings.js'
 import { collectRewriteContext, hasUnresolvedReference, renderRewriteInput, type ContextTurn } from './context.js'
 import { modeIncludes } from './prompt.js'
 import { messageOf } from './prompt.js'
@@ -170,6 +170,8 @@ export function installPreStepHook(ctx: Context, deps: PreStepDeps): () => void 
   const warned = new Set<string>()
   /** 已经报过几次"取不到会话身份"。 */
   let unresolvedPreStepReported = 0
+  /** 已经报过"这是子代理、被跳过"的会话（去重）。 */
+  const subagentSkipped = new Set<string>()
 
   /** 决定这条消息要不要改写。 */
   const decide = async (input: {
@@ -199,13 +201,34 @@ export function installPreStepHook(ctx: Context, deps: PreStepDeps): () => void 
     }
 
     // 2) 本会话的绑定（客户端在会话视图挂载时把"生效值"写进来）。
-    //    判定只有一份：`effectiveCardId()`（浏览器半边显示的角色也走它）。
-    const cardId = effectiveCardId({
+    //    判定只有一份：`resolveCardId()`（浏览器半边显示的角色也走它）。
+    //    子代理在这里被拦下：它的任务提示词 source.kind 也是 user，不拦就会被改写。
+    const meta = sessionMetaOf(input.session)
+    const cardId = resolveCardId({
       binding: deps.state().binding(input.sessionId),
+      ...(meta.isSubagent && cfg.inheritFromParent && meta.parentSessionId !== ''
+        ? { parentBinding: deps.state().binding(meta.parentSessionId) }
+        : {}),
       defaultCardId: cfg.defaultCardId,
       injectIntoUnbound: cfg.injectIntoUnboundSessions,
+      isSubagent: meta.isSubagent,
+      ignoreSubagents: cfg.ignoreSubagents,
+      inheritFromParent: cfg.inheritFromParent,
     })
-    if (cardId === '') return { kind: 'keep' }
+    if (cardId === '') {
+      if (meta.isSubagent && cfg.ignoreSubagents) {
+        const mark = input.sessionId
+        if (!subagentSkipped.has(mark) && subagentSkipped.size < 8) {
+          subagentSkipped.add(mark)
+          deps.trace.push({
+            kind: 'host:subagent-skipped',
+            sessionId: input.sessionId,
+            note: `子代理会话（parent=${meta.parentSessionId === '' ? '?' : meta.parentSessionId.slice(-8)}）→ 不改写它的任务提示词（ignoreSubagents）`,
+          })
+        }
+      }
+      return { kind: 'keep' }
+    }
 
     const card = deps.library().get(cardId)
     if (card === undefined) {

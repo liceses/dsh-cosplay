@@ -82,6 +82,14 @@ export const Config = Schema.object({
     .default(DEFAULT_CONFIG.personaEcho)
     .description('在系统提示词最末尾再放一句角色原话（"尾部回声"）。默认开：本项目对照实验里它让人设标记密度 0.91→1.16/百字、独立评审 10→17 分，代价约 +40 字/请求')
     .volatile(),
+  ignoreSubagents: Schema.boolean()
+    .default(DEFAULT_CONFIG.ignoreSubagents)
+    .description('子代理会话一律不注入、不改写（默认开）。子代理的任务提示词也算"用户消息"，不隔离的话会被单卡改写成另一种风格')
+    .volatile(),
+  inheritFromParent: Schema.boolean()
+    .default(DEFAULT_CONFIG.inheritFromParent)
+    .description('子代理是否继承父会话绑定的角色卡（默认关；只沿父链看一层，且需先关掉 ignoreSubagents）')
+    .volatile(),
   personaMaxChars: Schema.number()
     .default(DEFAULT_CONFIG.personaMaxChars)
     .description('系统提示注入正文的长度上限（字符，默认 8000）')

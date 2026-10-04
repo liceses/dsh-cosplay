@@ -25,19 +25,19 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { createCosplayCommand } from './command.js'
-import { effectiveCardId } from './bindings.js'
+import { resolveCardId, sessionMetaOf } from './bindings.js'
 import { DEFAULT_CONFIG } from './config.js'
 import { installPreStepHook } from './hook.js'
 import { createLibrary, resolveLibraryPaths, type Library } from './library.js'
 import { installDurableObserver } from './observe.js'
 import { PACKAGE_NAME } from './protocol.js'
-import { composeEchoText, composePersonaText, modeIncludes, registerEchoSection, registerPersonaSection } from './prompt.js'
+import { composeEchoText, composePersonaText, modeIncludes, registerEchoSection, registerPersonaSection, sessionOf } from './prompt.js'
 import { createCosplayRoute, type ProbeRuntime } from './route.js'
 import { createRewriter } from './rewrite.js'
 import { Config, resolveLive, type LiveConfig } from './schema.js'
 import { createState, type StateStore } from './state.js'
 import { createTrace } from './trace.js'
-import type { CosplayStats } from './types.js'
+import type { CosplayCard, CosplayStats } from './types.js'
 
 /** 结构化最小面：Web 客户端装配图（可选服务）。 */
 interface ClientModulesFace {
@@ -121,22 +121,57 @@ export function apply(ctx: Context, live: LiveConfig): void {
   // 2) 人设注入段
   /** 已经报过"注入了多长"的 (会话, 卡) —— 每组合只报一次，别刷爆环形缓冲。 */
   const personaReported = new Set<string>()
+  /** 已经报过"这是子代理、被跳过"的会话（去重，别刷爆环形缓冲）。 */
+  const subagentSkipped = new Set<string>()
+
+  /**
+   * 解析"这次装配该用哪张卡"（人设段与尾部回声段共用）。
+   *
+   * 判定本身只有一份（`bindings.ts` 的 `resolveCardId`）；这里补两件事：
+   *   - 从装配上下文里读**会话身份元信息**（是不是子代理、父会话是谁）；
+   *   - 需要继承时才去查父会话的绑定（`inheritFromParent`，默认关）。
+   */
+  const resolveForAssembly = (sessionId: string, context: unknown): CosplayCard | undefined => {
+    const cfg = readConfig()
+    const meta = sessionMetaOf(sessionOf(context))
+    const cardId = resolveCardId({
+      binding: state().binding(sessionId),
+      ...(meta.isSubagent && cfg.inheritFromParent && meta.parentSessionId !== ''
+        ? { parentBinding: state().binding(meta.parentSessionId) }
+        : {}),
+      defaultCardId: cfg.defaultCardId,
+      injectIntoUnbound: cfg.injectIntoUnboundSessions,
+      isSubagent: meta.isSubagent,
+      ignoreSubagents: cfg.ignoreSubagents,
+      inheritFromParent: cfg.inheritFromParent,
+    })
+    if (cardId === '') {
+      // 子代理被主动跳过时留一条痕（前几次 + 抽样，别刷屏）。
+      if (meta.isSubagent && cfg.ignoreSubagents && subagentSkipped.size < 8) {
+        const mark = `${sessionId}`
+        if (!subagentSkipped.has(mark)) {
+          subagentSkipped.add(mark)
+          trace.push({
+            kind: 'host:subagent-skipped',
+            sessionId,
+            note: `子代理会话（parent=${meta.parentSessionId === '' ? '?' : meta.parentSessionId.slice(-8)}）→ 不注入、不改写（ignoreSubagents）`,
+          })
+        }
+      }
+      return undefined
+    }
+    return library().get(cardId)
+  }
+
   ctx.effect(
     () =>
       registerPersonaSection(ctx, {
         trace,
         stats,
-        compose: (sessionId) => {
+        compose: (sessionId, context) => {
           const cfg = readConfig()
           if (!cfg.enabled || sessionId === undefined) return ''
-          // 判定只有一份（`bindings.ts`）：浏览器半边显示的角色走的也是它。
-          const cardId = effectiveCardId({
-            binding: state().binding(sessionId),
-            defaultCardId: cfg.defaultCardId,
-            injectIntoUnbound: cfg.injectIntoUnboundSessions,
-          })
-          if (cardId === '') return ''
-          const card = library().get(cardId)
+          const card = resolveForAssembly(sessionId, context)
           if (card === undefined) return ''
           if (!modeIncludes(card, cfg.strategy, 'system')) return ''
           const text = composePersonaText(card, cfg.personaMaxChars)
@@ -167,16 +202,10 @@ export function apply(ctx: Context, live: LiveConfig): void {
       registerEchoSection(ctx, {
         trace,
         stats,
-        compose: (sessionId) => {
+        compose: (sessionId, context) => {
           const cfg = readConfig()
           if (!cfg.enabled || !cfg.personaEcho || sessionId === undefined) return ''
-          const cardId = effectiveCardId({
-            binding: state().binding(sessionId),
-            defaultCardId: cfg.defaultCardId,
-            injectIntoUnbound: cfg.injectIntoUnboundSessions,
-          })
-          if (cardId === '') return ''
-          const card = library().get(cardId)
+          const card = resolveForAssembly(sessionId, context)
           if (card === undefined) return ''
           if (!modeIncludes(card, cfg.strategy, 'system')) return ''
           const text = composeEchoText(card)

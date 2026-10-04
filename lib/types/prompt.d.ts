@@ -27,6 +27,8 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { CosplayCard, CosplayStats, TraceEntry } from './types.js';
+/** 从装配上下文里取**会话对象**（读会话头用）；取不到返回 undefined。 */
+export declare function sessionOf(context: unknown): unknown;
 /** 提示段依赖。 */
 export interface PersonaSectionDeps {
     trace: {

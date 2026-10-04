@@ -64,6 +64,22 @@ export interface CosplayConfig {
    * 所以这里的结论只当作"无害 + 略有帮助"，样本不大；不想要就把这个开关关掉。
    */
   personaEcho: boolean
+  /**
+   * 子代理会话（`session.header.origin === 'subagent'`）一律不注入、不改写。
+   *
+   * 默认**开**，理由不只是"别污染"：实测子代理的**首条任务提示词 `source.kind === 'user'`**，
+   * 所以一旦 `injectIntoUnboundSessions` 打开且默认卡是改写卡，父代理精心写的任务说明
+   * 会被改写成另一种风格再交给子代理 —— 这是个真实的脚枪，用这条焊死。
+   */
+  ignoreSubagents: boolean
+  /**
+   * 子代理是否继承**父会话**绑定的角色卡（默认关）。
+   *
+   * 只在 `ignoreSubagents=false` 时有意义（否则子代理整条链路不参与）。
+   * 只沿父链看**一层**：父会话 id 在会话头里，父会话的绑定在我们自己的 `state.json` 里，
+   * 所以不需要再去加载父会话对象。
+   */
+  inheritFromParent: boolean
   /** 系统注入正文的长度上限（字符），保护上下文。 */
   personaMaxChars: number
   /** 是否在「对话 / 轨迹」旁显示「角色」页签。 */
@@ -97,6 +113,8 @@ export const DEFAULT_CONFIG: CosplayConfig = {
   rewriteContextMaxChars: 2400,
   rewriteGuardUnresolved: true,
   personaEcho: true,
+  ignoreSubagents: true,
+  inheritFromParent: false,
   personaMaxChars: 8000,
   showTab: true,
   coverAspect: 1,

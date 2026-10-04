@@ -53,10 +53,20 @@ interface PromptSectionRegistrar {
  * 所以读会话身份走两条路：`agent.id` 优先、`scope.id` 兜底。
  * （这条兜底不是洁癖：单点依赖那个未声明字段的话，一旦 DSH 不再传 `agent`，
  * 症状是"所有会话突然都没角色"，而且**不报错**。）
+ *
+ * 两个槽位都带上 `session`：运行时 agent 对象上有 `session`（官方 `Agent` 的声明面，
+ * `dsh-agent/lib/types/runtime-types.d.ts` 里是 `readonly session: Session`），
+ * 我们靠它读会话头（子代理/父会话）。
  */
 interface AssemblyContextLike {
-  agent?: { id?: unknown }
-  scope?: { id?: unknown }
+  agent?: { id?: unknown; session?: unknown }
+  scope?: { id?: unknown; session?: unknown }
+}
+
+/** 从装配上下文里取**会话对象**（读会话头用）；取不到返回 undefined。 */
+export function sessionOf(context: unknown): unknown {
+  const value = context as AssemblyContextLike | null | undefined
+  return value?.agent?.session ?? value?.scope?.session
 }
 
 /** 取不到会话身份时，最多报几次（之后按步长抽样报，别刷爆环形缓冲）。 */

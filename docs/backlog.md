@@ -32,15 +32,18 @@
 | **依赖** | 无 |
 | **依据** | [playbook §5.3](playbook-persona-cards.md) · 研究报告 E3 |
 
-### B3 · 子代理策略开关（`ignoreSubagents` 默认开 + `inheritFromParent` 默认关）
+### ~~B3 · 子代理策略开关（`ignoreSubagents` 默认开 + `inheritFromParent` 默认关）~~ ✅ 已完成（2026-10-03）
+
+已实现：`resolveCardId()` 判定顺序里加了第 1 条（子代理 + `ignoreSubagents` → 空）与第 4 条
+（子代理 + `inheritFromParent` → 父会话的卡）；`sessionMetaOf()` 读官方声明字段
+`header.origin === 'subagent'` / `header.parentSession`；人设段、尾部回声段、pre-step 三处共用同一判定；
+跳过时留 `host:subagent-skipped` 痕。单测 +9（含"配了默认改写卡也不动子代理任务提示词"这条脚枪保险）。
+**为什么保留在本节**：原描述见下（历史记录）。
 
 | 项 | 内容 |
 |---|---|
 | **为什么** | 实测：子代理是**独立会话**（`origin: 'subagent'`，269 个样本，**没有一个人设段**）→ 默认隔离是对的。但 `injectIntoUnboundSessions=true` 时会出事：① 子代理会吃到人设；② **子代理的首条任务提示词 `source.kind === 'user'`**（实测），于是**父代理精心写的任务说明会被默认的改写卡改写成甲方文** |
-| **现状** | **未开工，且此前只存在于对话里**（本轮才补记到本文档） |
-| **做法** | `ignoreSubagents`：无论别的配置怎么设，`origin === 'subagent'` 的会话一律不注入、不改写（读 `session.header.origin` / `parentSession`）；`inheritFromParent`：沿父链找绑定（最多 3 层防环），显式开关 |
-| **成本** | 小–中（读 header + 两个配置项 + 单测） |
-| **依赖** | `session.header` 运行时可读（`dsh-session` 已声明）；pre-step 侧现成，人设段侧需按 id 反查 |
+| **做法** | `ignoreSubagents`：无论别的配置怎么设，`origin === 'subagent'` 的会话一律不注入、不改写；`inheritFromParent`：只看父链一层 |
 | **依据** | 会话日志实测（2026-10-03）· [研究报告 §5](research-persona-prompting-2026-10.md) |
 
 ### B4 · 思考链风格控制（仅 DeepSeek-V4 系，可选）

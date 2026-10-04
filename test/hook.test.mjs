@@ -45,6 +45,9 @@ function config(overrides = {}) {
     rewriteContextTurns: 0,
     rewriteContextMaxChars: 2400,
     rewriteGuardUnresolved: false,
+    // 子代理规则（真实默认值：隔离开、继承关）
+    ignoreSubagents: true,
+    inheritFromParent: false,
     personaMaxChars: 8000,
     traceSize: 50,
     ...overrides,

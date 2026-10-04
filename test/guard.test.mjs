@@ -48,6 +48,9 @@ function config(overrides = {}) {
     rewriteContextTurns: 6,
     rewriteContextMaxChars: 2400,
     rewriteGuardUnresolved: true,
+    // 子代理规则（真实默认值：整条链路隔离、继承关）
+    ignoreSubagents: true,
+    inheritFromParent: false,
     personaMaxChars: 8000,
     traceSize: 50,
     ...overrides,
@@ -90,11 +93,12 @@ function accidentSurface() {
 }
 
 /** 建 harness —— 记录每次 rewrite 收到的 `input`。 */
-function harness({ surface = [], cfg = config(), binding = { cardId: 'hardcore', enabled: true } } = {}) {
+function harness({ surface = [], cfg = config(), binding = { cardId: 'hardcore', enabled: true }, bindings = {}, sessionId = 's1', header } = {}) {
   const trace = createTrace(80)
   const counters = stats()
   const calls = []
   const records = []
+  const asked = []
   let listener
   const ctx = {
     on(name, fn) {
@@ -109,7 +113,14 @@ function harness({ surface = [], cfg = config(), binding = { cardId: 'hardcore',
     stats: counters,
     config: () => cfg,
     library: () => ({ get: (id) => (id === 'hardcore' ? CARD : undefined) }),
-    state: () => ({ binding: () => binding, recordRewrite: (sessionId, record) => records.push({ sessionId, ...record }) }),
+    state: () => ({
+      // 按 id 查绑定：`bindings` 里显式给了就用它，否则退回单个 `binding`（兼容旧用例）。
+      binding: (id) => {
+        asked.push(id)
+        return Object.prototype.hasOwnProperty.call(bindings, id) ? bindings[id] : binding
+      },
+      recordRewrite: (id, record) => records.push({ sessionId: id, ...record }),
+    }),
     probe: { armed: false, touched: new Set(), sessions: [] },
     rewrite: async (request) => {
       calls.push(request)
@@ -117,19 +128,21 @@ function harness({ surface = [], cfg = config(), binding = { cardId: 'hardcore',
     },
   })
   const session = {
+    id: sessionId,
     surface: { nodes: surface.map((_, index) => index) },
     eventAt: (seq) => surface[seq],
-    header: { cwd: 'D:\\developing\\DSH-plugin\\dsh-cosplay' },
+    header: header ?? { cwd: 'D:\\developing\\DSH-plugin\\dsh-cosplay' },
   }
   return {
     trace,
     calls,
     records,
+    asked,
     stats: counters,
     run: (text, { id = 'm1', withSession = true } = {}) =>
       listener(
         {
-          agent: withSession ? { id: 's1', session } : { id: 's1' },
+          agent: withSession ? { id: sessionId, session } : { id: sessionId },
           messages: [message(text, id)],
           turn: 2,
           step: 1,
@@ -199,4 +212,53 @@ test('会话对象缺失（拿不到 surface）→ 按无上下文处理，不�
   const decision = await h.run(ACCIDENT_TEXT, { withSession: false })
   assert.equal(decision.kind, 'enter')
   assert.equal(h.calls.length, 0, '无 surface 且含指代 → 守卫跳过')
+})
+
+/* ─────────────── 子代理隔离与继承（B3，端到端）─────────────── */
+
+test('子代理：即使配了默认改写卡，也不动它的任务提示词（脚枪保险）', async () => {
+  // 场景：injectIntoUnboundSessions=true + 默认卡=改写卡（最危险的配置）
+  const h = harness({
+    cfg: config({ injectIntoUnboundSessions: true, defaultCardId: 'hardcore' }),
+    binding: undefined,
+    sessionId: 'sub-1',
+    header: { origin: 'subagent', parentSession: 'session-parent' },
+  })
+  const decision = await h.run('你是「铁骑」——按这个任务写生图提示词：…')
+  assert.equal(textOfMessage(decision.messages[0]), '你是「铁骑」——按这个任务写生图提示词：…', '子代理的任务提示词必须原样')
+  assert.equal(h.calls.length, 0, '一次模型调用都不该发生')
+  assert.equal(h.stats.preStepRewrote, 0)
+  assert.equal(h.trace.list().some((e) => e.kind === 'host:subagent-skipped'), true, '要留一条痕说明为什么没改')
+})
+
+test('子代理：关掉 ignoreSubagents 后默认卡照常生效（说明开关有效，不是硬编码）', async () => {
+  const h = harness({
+    cfg: config({ injectIntoUnboundSessions: true, defaultCardId: 'hardcore', ignoreSubagents: false }),
+    binding: undefined,
+    sessionId: 'sub-2',
+    header: { origin: 'subagent', parentSession: 'session-parent' },
+  })
+  const decision = await h.run('写一段生图提示词')
+  assert.equal(h.calls.length, 1)
+  assert.equal(textOfMessage(decision.messages[0]), '老哥们，任务：把 miku 页面提交到仓库！')
+})
+
+test('子代理：inheritFromParent 打开则用父会话的卡（且会去查父会话的绑定）', async () => {
+  const h = harness({
+    cfg: config({ ignoreSubagents: false, inheritFromParent: true }),
+    bindings: { 'session-parent': { cardId: 'hardcore', enabled: true, updatedAt: 9 } },
+    binding: undefined,
+    sessionId: 'sub-3',
+    header: { origin: 'subagent', parentSession: 'session-parent' },
+  })
+  await h.run('写一段生图提示词')
+  assert.equal(h.calls.length, 1, '继承了父会话的改写卡 → 会改写')
+  assert.equal(h.asked.includes('session-parent'), true, '必须真的去查过父会话的绑定')
+})
+
+test('普通会话不受子代理规则影响（回归）', async () => {
+  const h = harness({ binding: { cardId: 'hardcore', enabled: true } })
+  await h.run('画一张秦始皇骑北极熊')
+  assert.equal(h.calls.length, 1)
+  assert.equal(h.trace.list().some((e) => e.kind === 'host:subagent-skipped'), false)
 })
