@@ -39,6 +39,8 @@ const port = Number(args[0] ?? 31999)
 const turns = args.includes('--turns') ? Number(args[args.indexOf('--turns') + 1]) : 3
 const only = args.includes('--arm') ? args[args.indexOf('--arm') + 1] : ''
 const label = args.includes('--label') ? args[args.indexOf('--label') + 1] : ''
+const personaCard = args.includes('--card') ? args[args.indexOf('--card') + 1] : 'catgirl'
+const cardLabel = args.includes('--card-label') ? args[args.indexOf('--card-label') + 1] : personaCard
 const out = args.includes('--out') ? args[args.indexOf('--out') + 1] : join('.dsh', `experiment-persona-${label || 'default'}.json`)
 const base = `http://127.0.0.1:${port}/api/dsh-cosplay`
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -135,16 +137,16 @@ async function runArm(name, description, bindPlan) {
 const plans = {
   // A：第 1 轮就绑猫娘（之后不再改绑）
   A: () => [
-    ['A', `${turns} 轮全程猫娘`, (index) => (index === 0 ? 'catgirl' : undefined)],
+    ['A', `${turns} 轮全程猫娘`, (index) => (index === 0 ? personaCard : undefined)],
   ],
   // B：前 N-1 轮无角色 → 第 N 轮绑猫娘
-  B: () => [['B', `前 ${turns - 1} 轮无角色 → 第 ${turns} 轮切猫娘`, (index) => (index === turns - 1 ? 'catgirl' : undefined)]],
+  B: () => [['B', `前 ${turns - 1} 轮无角色 → 第 ${turns} 轮切猫娘`, (index) => (index === turns - 1 ? personaCard : undefined)]],
   // C：前 N-1 轮硬邦邦 → 第 N 轮切猫娘（强冲突）
   C: () => [
     [
       'C',
       `前 ${turns - 1} 轮硬邦邦 → 第 ${turns} 轮切猫娘（强冲突）`,
-      (index) => (index === turns - 1 ? 'catgirl' : 'hardcore'),
+      (index) => (index === turns - 1 ? personaCard : 'hardcore'),
     ],
   ],
 }
