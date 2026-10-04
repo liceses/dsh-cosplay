@@ -339,6 +339,47 @@ export function modeIncludes(card: CosplayCard, strategy: 'card' | 'system' | 'r
 }
 
 /**
+ * 思考链风格标记（**逐字**来自 E4 那份社区文档，一个字都没改）。
+ *
+ * 为什么逐字：这是"训练时的注入位置 + 训练过的措辞"这种东西，改措辞等于换指令；我们唯一实测过的
+ * 就是这两段原文（见 `docs/backlog.md` 的 B4）。
+ *
+ * 实测效果（2026-10-03，只读 A/B，3 轮 × 2 组）：加上 `immersive` 之后，思考语言从**英文**（中文占比 0%）
+ * 变成**中文**（63%）、英文分析腔 3/3 → 0/4、出现第一人称（1.3/百字）、思考长度 2818 → 700 字；
+ * 工具调用无退化（2→2）、无标记泄漏。**但没有复现文档承诺的"括号内心独白"**（全角括号 0 命中）。
+ */
+export const THINKING_MARKER_IMMERSIVE = [
+  '【角色沉浸要求】在你的思考过程（<think>标签内）中，请遵守以下规则：',
+  '1. 请以角色第一人称进行内心独白，用括号包裹内心活动，例如"（心想：……）"或"(内心OS：……)"',
+  '2. 用第一人称描写角色的内心感受，例如"我心想""我觉得""我暗自"等',
+  '3. 思考内容应沉浸在角色中，通过内心独白分析剧情和规划回复',
+].join('\n')
+
+/** 纯分析模式的标记（同样是 E4 原文）。 */
+export const THINKING_MARKER_ANALYSIS = [
+  '【思维模式要求】在你的思考过程（<think>标签内）中，请遵守以下规则：',
+  '1. 禁止使用圆括号包裹内心独白，例如"（心想：……）"或"(内心OS：……)"，所有分析内容直接陈述即可',
+  '2. 禁止以角色第一人称描写内心活动，例如"我心想""我觉得""我暗自"等，请用分析性语言替代',
+  '3. 思考内容应聚焦于剧情走向分析和回复内容规划，不要在思考中进行角色扮演式的内心戏表演',
+].join('\n')
+
+/**
+ * 按配置取思考链标记正文（`off` 返回空串 = 一个字节都不加）。
+ * @param mode - 配置里的 `thinkingFlavor`。
+ */
+export function composeThinkingMarker(mode: 'off' | 'immersive' | 'analysis'): string {
+  if (mode === 'immersive') return THINKING_MARKER_IMMERSIVE
+  if (mode === 'analysis') return THINKING_MARKER_ANALYSIS
+  return ''
+}
+
+/** 把标记追加到用户消息末尾（E4 说首轮 user 消息末尾是训练时的注入位）；已存在则不重复加。 */
+export function appendThinkingMarker(text: string, marker: string): string {
+  if (marker === '' || text.includes('【角色沉浸要求】') || text.includes('【思维模式要求】')) return text
+  return `${text}\n\n${marker}`
+}
+
+/**
  * 组装系统提示注入正文。
  *
  * 上限按"裁剪人设正文、保留头尾纪律"的方式处理：纪律句是有作用的（防止角色泄露

@@ -14,15 +14,18 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { echoTextOf, normalizeCard } from '../lib/cards.js'
 import {
+  appendThinkingMarker,
   composeEchoText,
   composePersonaText,
   composeRewriteSystem,
+  composeThinkingMarker,
   describeIdentity,
   registerAnchorContext,
   registerEchoSection,
   registerPersonaSection,
   sessionIdOf,
 } from '../lib/prompt.js'
+import { withThinkingFlavor } from '../lib/hook.js'
 import { createTrace } from '../lib/trace.js'
 
 /** 一张人设卡。 */
@@ -227,4 +230,42 @@ test('运行时上下文锚点：注册名/order 正确，取不到身份不注�
 test('运行时上下文锚点：宿主没有 context() 时安静返回 undefined', () => {
   assert.equal(registerAnchorContext({ get: () => undefined }, { trace: createTrace(5), stats: { sectionCalls: 0, sectionFilled: 0, sectionUnresolved: 0 }, compose: () => 'x' }), undefined)
   assert.equal(registerAnchorContext({ get: () => ({ section: () => () => {} }) }, { trace: createTrace(5), stats: { sectionCalls: 0, sectionFilled: 0, sectionUnresolved: 0 }, compose: () => 'x' }), undefined)
+})
+/* ─────────────── 角色风味思维链：标记文本与拼接 ─────────────── */
+
+test('思考链标记：逐字取自 E4，off 时一个字节都不加', () => {
+  assert.equal(composeThinkingMarker('off'), '')
+  const immersive = composeThinkingMarker('immersive')
+  assert.match(immersive, /^【角色沉浸要求】/)
+  assert.match(immersive, /以角色第一人称进行内心独白/)
+  assert.match(immersive, /内心OS/)
+  // 逐字保护：这三行是 E4 原文的骨架，别在改写中被"润色"掉
+  assert.equal(immersive.split('\n').length, 4)
+  assert.match(immersive, /3\. 思考内容应沉浸在角色中/)
+
+  const analysis = composeThinkingMarker('analysis')
+  assert.match(analysis, /^【思维模式要求】/)
+  assert.match(analysis, /禁止使用圆括号包裹内心独白/)
+  assert.equal(analysis.split('\n').length, 4)
+})
+
+test('appendThinkingMarker：空行分隔、幂等（已存在就不重复加）', () => {
+  const marker = composeThinkingMarker('immersive')
+  assert.equal(appendThinkingMarker('你好', ''), '你好', 'off 不改文本')
+  assert.equal(appendThinkingMarker('你好', marker), `你好\n\n${marker}`)
+  // 幂等：已经带了任一标记就不再追加
+  assert.equal(appendThinkingMarker(`你好\n\n${marker}`, marker), `你好\n\n${marker}`)
+  assert.equal(appendThinkingMarker('你好\n\n【思维模式要求】…', marker), '你好\n\n【思维模式要求】…')
+})
+
+test('withThinkingFlavor：只有"第 1 轮 + 人设链路"才生效', () => {
+  const persona = { id: 'catgirl', name: '赛博猫娘', mode: 'system', persona: 'p', version: 1, source: 'preset', createdAt: 0, updatedAt: 0 }
+  const rewriter = { ...persona, mode: 'rewrite', persona: undefined, rewrite: { rules: 'r' } }
+  const cfg = { strategy: 'card', thinkingFlavor: 'immersive' }
+  assert.match(withThinkingFlavor('你好', 1, persona, cfg), /【角色沉浸要求】/)
+  assert.equal(withThinkingFlavor('你好', 2, persona, cfg), '你好', '第 2 轮不加')
+  assert.equal(withThinkingFlavor('你好', 1, rewriter, cfg), '你好', '没有 system 链路的卡不加')
+  assert.equal(withThinkingFlavor('你好', 1, persona, { strategy: 'card', thinkingFlavor: 'off' }), '你好')
+  // strategy 强制 system 时，改写卡也会走到 system 链路 → 生效
+  assert.match(withThinkingFlavor('你好', 1, rewriter, { strategy: 'system', thinkingFlavor: 'immersive' }), /【角色沉浸要求】/)
 })

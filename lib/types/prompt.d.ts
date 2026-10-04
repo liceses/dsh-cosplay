@@ -88,6 +88,26 @@ export declare function effectiveMode(card: CosplayCard, strategy: 'card' | 'sys
 /** `both` 模式下两条链路都生效（各自返回 true）。 */
 export declare function modeIncludes(card: CosplayCard, strategy: 'card' | 'system' | 'rewrite', link: 'system' | 'rewrite'): boolean;
 /**
+ * 思考链风格标记（**逐字**来自 E4 那份社区文档，一个字都没改）。
+ *
+ * 为什么逐字：这是"训练时的注入位置 + 训练过的措辞"这种东西，改措辞等于换指令；我们唯一实测过的
+ * 就是这两段原文（见 `docs/backlog.md` 的 B4）。
+ *
+ * 实测效果（2026-10-03，只读 A/B，3 轮 × 2 组）：加上 `immersive` 之后，思考语言从**英文**（中文占比 0%）
+ * 变成**中文**（63%）、英文分析腔 3/3 → 0/4、出现第一人称（1.3/百字）、思考长度 2818 → 700 字；
+ * 工具调用无退化（2→2）、无标记泄漏。**但没有复现文档承诺的"括号内心独白"**（全角括号 0 命中）。
+ */
+export declare const THINKING_MARKER_IMMERSIVE: string;
+/** 纯分析模式的标记（同样是 E4 原文）。 */
+export declare const THINKING_MARKER_ANALYSIS: string;
+/**
+ * 按配置取思考链标记正文（`off` 返回空串 = 一个字节都不加）。
+ * @param mode - 配置里的 `thinkingFlavor`。
+ */
+export declare function composeThinkingMarker(mode: 'off' | 'immersive' | 'analysis'): string;
+/** 把标记追加到用户消息末尾（E4 说首轮 user 消息末尾是训练时的注入位）；已存在则不重复加。 */
+export declare function appendThinkingMarker(text: string, marker: string): string;
+/**
  * 组装系统提示注入正文。
  *
  * 上限按"裁剪人设正文、保留头尾纪律"的方式处理：纪律句是有作用的（防止角色泄露

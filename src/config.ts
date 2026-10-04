@@ -62,6 +62,19 @@ export interface CosplayConfig {
    */
   anchorSeat: 'system' | 'context'
   /**
+   * **角色风味思维链**：把 E4 的思考链风格标记逐字追加到**本会话首条用户消息末尾**
+   * （E4 说那是训练时的注入位；放 system 里效果次之）。
+   *
+   * - `off`（默认）：一个字节都不加；
+   * - `immersive`：让思考变成第一人称内心戏（实测：思考语言 0% → 63% 中文、英文分析腔 3/3 → 0/4）；
+   * - `analysis`：反过来，禁止括号独白与第一人称。
+   *
+   * 只在这三件事同时成立时才生效：**第 1 轮** + **本会话真的有角色人设**（system 链路生效）
+   * + 开关不是 `off`。代价是**改动了你的原话**（durable、对话里可见），所以默认关。
+   * 详见 `docs/backlog.md` 的 B4（含实测数据与"没复现括号独白"的结论）。
+   */
+  thinkingFlavor: 'off' | 'immersive' | 'analysis'
+  /**
    * 是否在系统提示词**最末尾**再放一句角色的原话（"尾部回声"）。
    *
    * 默认**开**，依据是本项目自己的对照实验（`scripts/experiment-persona.mjs`，
@@ -124,6 +137,7 @@ export const DEFAULT_CONFIG: CosplayConfig = {
   rewriteGuardUnresolved: true,
   personaEcho: true,
   anchorSeat: 'system',
+  thinkingFlavor: 'off',
   ignoreSubagents: true,
   inheritFromParent: false,
   personaMaxChars: 8000,

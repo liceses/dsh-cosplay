@@ -38,6 +38,7 @@ export declare const Config: Schema<Schemastery.ObjectS<NoInfer<{
     rewriteContextMaxChars: Schema<number, number, "volatile-defined">;
     rewriteGuardUnresolved: Schema<boolean, boolean, "volatile-defined">;
     anchorSeat: Schema<"system" | "context", "system" | "context", "volatile-defined">;
+    thinkingFlavor: Schema<"off" | "immersive" | "analysis", "off" | "immersive" | "analysis", "volatile-defined">;
     personaEcho: Schema<boolean, boolean, "volatile-defined">;
     ignoreSubagents: Schema<boolean, boolean, "volatile-defined">;
     inheritFromParent: Schema<boolean, boolean, "volatile-defined">;
@@ -64,6 +65,7 @@ export declare const Config: Schema<Schemastery.ObjectS<NoInfer<{
     rewriteContextMaxChars: Schema<number, number, "volatile-defined">;
     rewriteGuardUnresolved: Schema<boolean, boolean, "volatile-defined">;
     anchorSeat: Schema<"system" | "context", "system" | "context", "volatile-defined">;
+    thinkingFlavor: Schema<"off" | "immersive" | "analysis", "off" | "immersive" | "analysis", "volatile-defined">;
     personaEcho: Schema<boolean, boolean, "volatile-defined">;
     ignoreSubagents: Schema<boolean, boolean, "volatile-defined">;
     inheritFromParent: Schema<boolean, boolean, "volatile-defined">;

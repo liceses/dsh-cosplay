@@ -196,6 +196,7 @@ dsh plugin --profile web add github:<you>/dsh-cosplay
 | `rewriteContextTurns` | `6` | 改写时带多少条最近对话（≈3 轮）；`0` = 不带，退回旧行为 |
 | `rewriteContextMaxChars` | `2400` | 带进改写的上下文总字数上限（单条另有 800 字上限，超出走"保头保尾 + 中略"） |
 | `rewriteGuardUnresolved` | `true` | 原文含"这个 / 它 / 上一轮"这类指代、又拿不到上下文时**跳过改写**（原样放行） |
+| `thinkingFlavor` | `off` | **角色风味思维链**：把 E4 的思考链风格标记**逐字**追加到**本会话首条用户消息末尾**。`immersive` = 让思考变成第一人称内心戏（实测：思考语言 0% → 63% 中文、英文分析腔 3/3 → 0/4）；`analysis` = 反之。只在**第 1 轮 + 本会话真有角色人设**时生效。**默认关**：它会**改动你的原话**（durable、对话里可见） |
 | `anchorSeat` | `system` | 锚点座位：`system` = 系统提示词末尾（现状）；`context` = 注册成运行时上下文（以 user 角色落在**对话历史之后**）。**默认 `system`**：spike 实测静态 `context` 锚点只在第 1 轮落在历史之后、之后就沉底（详见 [backlog B1](docs/backlog.md)） |
 | `personaEcho` | `true` | 在系统提示词**最末尾**再放一句角色原话（"尾部回声"）。默认开，依据见「人设 × 上下文」一节的对照实验；不想要就关掉（代价约 +40 字/请求） |
 | `ignoreSubagents` | `true` | **子代理会话一律不注入、不改写**。实测子代理的任务提示词 `source.kind` 也是 `user`，不隔离的话（配合 `injectIntoUnboundSessions` + 改写卡）父代理写的任务说明会被改写成另一种风格 |

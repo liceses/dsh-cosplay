@@ -48,6 +48,7 @@ function config(overrides = {}) {
     // 子代理规则（真实默认值：隔离开、继承关）
     ignoreSubagents: true,
     inheritFromParent: false,
+    thinkingFlavor: 'off',
     personaMaxChars: 8000,
     traceSize: 50,
     ...overrides,
@@ -283,4 +284,44 @@ test('agent.id 缺失但有 agent.session.id → 兜底生效，仍按该会话�
   assert.equal(textOfMessage(decision.messages[0]), '老哥们，搞快点！', '兜底解析出的会话必须真的被用来查绑定')
   assert.deepEqual(h.asked, ['s-fallback'])
   assert.equal(h.stats.preStepUnresolved, 0, '兜底成功不算退化')
+})
+/* ─────────────── 角色风味思维链（thinkingFlavor，第 1 轮才加）─────────────── */
+
+test('角色风味思维链：第 1 轮 + 人设卡 → 标记追加到首条消息末尾；第 2 轮不加', async () => {
+  const catgirl = { id: 'catgirl', name: '赛博猫娘', mode: 'system', persona: '你是猫娘', version: 1, source: 'preset', createdAt: 0, updatedAt: 0 }
+  const h = harness({ cards: [catgirl], binding: { cardId: 'catgirl', enabled: true }, cfg: config({ thinkingFlavor: 'immersive' }) })
+
+  const first = await h.run(
+    { agent: { id: 's1' }, messages: [message()], turn: 1, step: 1, signal: new AbortController().signal },
+    defaultNext([message()]),
+  )
+  const text1 = textOfMessage(first.messages[0])
+  assert.equal(text1.startsWith('画一张秦始皇骑北极熊'), true, '原文必须还在最前')
+  assert.equal(text1.includes('【角色沉浸要求】'), true, '第 1 轮要追加沉浸标记')
+  assert.equal(text1.trimEnd().endsWith('通过内心独白分析剧情和规划回复'), true, '标记要逐字在末尾')
+
+  const second = await h.run(
+    { agent: { id: 's1' }, messages: [message({ id: 'm2' })], turn: 2, step: 1, signal: new AbortController().signal },
+    defaultNext([message({ id: 'm2' })]),
+  )
+  assert.equal(textOfMessage(second.messages[0]).includes('【角色沉浸要求】'), false, '第 2 轮不该再加')
+})
+
+test('角色风味思维链：off / 无角色 / 只走改写链路的卡 → 都不加', async () => {
+  const catgirl = { id: 'catgirl', name: '赛博猫娘', mode: 'system', persona: '你是猫娘', version: 1, source: 'preset', createdAt: 0, updatedAt: 0 }
+  const payload = { agent: { id: 's1' }, messages: [message()], turn: 1, step: 1, signal: new AbortController().signal }
+
+  const off = harness({ cards: [catgirl], binding: { cardId: 'catgirl', enabled: true }, cfg: config({ thinkingFlavor: 'off' }) })
+  assert.equal(textOfMessage((await off.run(payload, defaultNext([message()]))).messages[0]).includes('【角色'), false)
+
+  // analysis 模式加的是反向标记
+  const analysis = harness({ cards: [catgirl], binding: { cardId: 'catgirl', enabled: true }, cfg: config({ thinkingFlavor: 'analysis' }) })
+  const analyzed = textOfMessage((await analysis.run(payload, defaultNext([message()]))).messages[0])
+  assert.equal(analyzed.includes('【思维模式要求】'), true)
+  assert.equal(analyzed.includes('【角色沉浸要求】'), false)
+
+  // 只走改写链路的卡（hardcore 是 mode=rewrite）→ 没有"角色人设"，不该加
+  const rewriteOnly = harness({ cfg: config({ thinkingFlavor: 'immersive' }), binding: { cardId: 'hardcore', enabled: true } })
+  const rewritten = textOfMessage((await rewriteOnly.run(payload, defaultNext([message()]))).messages[0])
+  assert.equal(rewritten.includes('【角色沉浸要求】'), false, '没有 system 链路的卡不享受角色风味思维链')
 })

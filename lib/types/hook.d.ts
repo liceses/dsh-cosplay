@@ -81,6 +81,20 @@ export type RewriteOutcome = {
     kind: 'block';
     error: string;
 };
+/**
+ * 给首条用户消息追加"角色风味思维链"标记（`thinkingFlavor`）。
+ *
+ * 三个条件同时成立才动手（见 `config.ts` 的 `thinkingFlavor` 说明）：
+ *   - **第 1 轮**（E4：那是训练时的注入位；后续轮次不再加）；
+ *   - **本会话真的有角色人设**（`modeIncludes(card, strategy, 'system')`）—— 没有角色就谈不上"角色风味"；
+ *   - 开关不是 `off`。
+ *
+ * @returns 处理后的文本；不该动手时**原样返回**（调用方据此判断要不要返回 `text` 决策）。
+ */
+export declare function withThinkingFlavor(text: string, turn: number, card: CosplayCard, cfg: {
+    strategy: 'card' | 'system' | 'rewrite';
+    thinkingFlavor: 'off' | 'immersive' | 'analysis';
+}): string;
 /** pre-step 装配依赖。 */
 export interface PreStepDeps {
     trace: {

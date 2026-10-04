@@ -40,7 +40,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type { CosplayConfig } from './config.js'
 import { resolveCardId, sessionMetaOf } from './bindings.js'
 import { collectRewriteContext, hasUnresolvedReference, renderRewriteInput, type ContextTurn } from './context.js'
-import { modeIncludes } from './prompt.js'
+import { appendThinkingMarker, composeThinkingMarker, modeIncludes } from './prompt.js'
 import { messageOf } from './prompt.js'
 import type { ProbeRuntime } from './route.js'
 import type { Library } from './library.js'
@@ -140,6 +140,28 @@ function blockKindsOf(message: UserMessage): string {
 
 /** 改写判定结果。 */
 export type RewriteOutcome = { kind: 'text'; text: string } | { kind: 'keep' } | { kind: 'block'; error: string }
+
+/**
+ * 给首条用户消息追加"角色风味思维链"标记（`thinkingFlavor`）。
+ *
+ * 三个条件同时成立才动手（见 `config.ts` 的 `thinkingFlavor` 说明）：
+ *   - **第 1 轮**（E4：那是训练时的注入位；后续轮次不再加）；
+ *   - **本会话真的有角色人设**（`modeIncludes(card, strategy, 'system')`）—— 没有角色就谈不上"角色风味"；
+ *   - 开关不是 `off`。
+ *
+ * @returns 处理后的文本；不该动手时**原样返回**（调用方据此判断要不要返回 `text` 决策）。
+ */
+export function withThinkingFlavor(
+  text: string,
+  turn: number,
+  card: CosplayCard,
+  cfg: { strategy: 'card' | 'system' | 'rewrite'; thinkingFlavor: 'off' | 'immersive' | 'analysis' },
+): string {
+  if (turn !== 1) return text
+  if (cfg.thinkingFlavor === 'off') return text
+  if (!modeIncludes(card, cfg.strategy, 'system')) return text
+  return appendThinkingMarker(text, composeThinkingMarker(cfg.thinkingFlavor))
+}
 
 /** pre-step 装配依赖。 */
 export interface PreStepDeps {
@@ -246,7 +268,9 @@ export function installPreStepHook(ctx: Context, deps: PreStepDeps): () => void 
 
     // 3) 这张卡在当前策略下要不要走"改写"这条链路。
     if (!modeIncludes(card, cfg.strategy, 'rewrite') || card.rewrite === null || card.rewrite === undefined) {
-      return { kind: 'keep' }
+      // 3b) 不走改写，但**角色风味思维链**可能仍要生效（人设卡也会命中这条）。
+      const flavored = withThinkingFlavor(input.text, input.turn, card, cfg)
+      return flavored === input.text ? { kind: 'keep' } : { kind: 'text', text: flavored }
     }
     if (input.text.trim() === '') return { kind: 'keep' }
 
@@ -342,7 +366,8 @@ export function installPreStepHook(ctx: Context, deps: PreStepDeps): () => void 
         id: card.id,
         note: `${result.cached ? '缓存命中' : `${result.ms}ms`} · ${result.model} · ${input.text.length} 字 → ${result.text.length} 字`,
       })
-      return { kind: 'text', text: result.text }
+      // 3b) 改写之后才追思考链标记：标记是给模型看的**指令**，不该被改写卡再嚼一遍。
+      return { kind: 'text', text: withThinkingFlavor(result.text, input.turn, card, cfg) }
     }
 
     deps.trace.push({
