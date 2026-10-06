@@ -1,18 +1,102 @@
-# dsh-cosplay
+# dsh-cosplay · 让模型进入角色
 
-让 DSH 里的模型**进入角色**：用「角色卡」规定它的身份、语气与提示词风格。
+> **English**: A DeepSeek Harness plugin that puts the model in character — either by injecting a persona card into the system prompt, or by rewriting your message before the model ever sees it.
 
-两条链路都实现，**卡里可选**：
+[![DSH Plugin](https://img.shields.io/badge/DSH-plugin-4f46e5.svg)](https://github.com/liceses/awesome-dsh-plugin)
+![DSH version](https://img.shields.io/badge/DSH-%E2%89%A50.1.7--rc.1%20%3C0.3-0ea5e9.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 
-| 链路 | 落点 | 适合谁 |
+给 DSH 里的模型一张**角色卡**，让它以指定的身份、语气与提示词风格作答。卡是你自己写的，插件负责把它送到模型眼前。
+
+两种卡，解决两件不同的事：
+
+| 你想干的事 | 用哪种卡 | 你看到的效果 |
 | --- | --- | --- |
-| **人设注入** | 系统提示段 `dsh-cosplay:persona` | 猫娘这类"人设卡"：你正常说话，模型以角色身份作答 |
-| **提示词改写** | `agent/pre-step` 替换用户消息 | 硬邦邦这类"改写卡"：你发一句，模型收到的是按规则重写后的 prompt |
+| 让模型**以某个身份说话**（猫娘 / 温柔学姐 / 中二法师） | **人设卡** | 你正常说话，回复带上角色口吻 |
+| 让模型**收到另一种写法的需求**（暴躁甲方 / 需求翻译机） | **改写卡** | 你发一句话，模型收到的是按你的规则重写后的 prompt |
 
-入口是聊天区顶部的**「角色」页签**（就在「对话 / 轨迹」旁边）：卡片网格 → 点一张进二级详情 → 在本会话使用。
+![角色页签：卡片网格](docs/screenshots/character-tab.jpg)
+*聊天区顶部的「角色」页签 —— 卡片网格，点一张进二级详情，在本会话使用。*
 
 ---
 
+## 快速开始
+
+### 一、装
+
+**前提：装完要重挂插件（宿主半边）**；只改浏览器半边时刷新页面即可。
+
+```bash
+# 方式一：本地链接（开发用）
+npm install && npm run build
+dsh plugin --profile web add "link:D:\developing\DSH-plugin\dsh-cosplay"
+
+# 方式二：GitHub（lib/ 已入库，免编译）
+dsh plugin --profile web add github:<you>/dsh-cosplay
+```
+
+> **DSH Desktop 用户**：`desktop` profile 由 Electron 独占管理，命令行会被拒绝，
+> 请在**设置 → 插件**界面填仓库地址（或本地路径）。
+
+没网时：`node scripts/link-sdk.mjs` 把 `node_modules/@deepseek-ai/*` 指向本机 SDK 镜像，
+`npx tsc --noEmit` 与 `npm run build` 照样能跑（只需要 typescript 与 tsdown 在本地）。
+
+### 二、用：新建会话的第一屏就能选角
+
+输入框左下角（`+` / 权限 / 模式 那一排）有一个 `🎭 无角色` 胶囊 —— 点它弹出卡片列表，选一张，然后直接发第一句话。
+
+![输入框 chip：首轮选角](docs/screenshots/first-turn-chip.jpg)
+*`🎭 无角色` chip 的弹出面板 —— 列表右侧标出每张卡走「人设」还是「改写」链路。*
+
+第二轮开始顶部才会出现「对话 / 轨迹 / **角色**」页签，那里是卡片管理面（网格 / 二级详情 / 编辑 / 立绘 / 导入导出）。
+
+> **为什么入口在输入框而不是页签**：DSH 的**空白会话不渲染页签条**
+> （`dsh-client-ui-conversation`：`showTabs = !hideChrome && …`，空白态 `hideChrome = blank`；
+> 视图区在 blank 阶段直接 `return null`）。所以"打开角色页签再选角"对**第一轮**根本不成立 ——
+> chip 就是为这件事存在的：它随会话视图挂载，**在你敲字之前就把"本会话用哪张卡"写进宿主**。
+
+1. **新建会话 → 点 chip → 选一张卡 → 发第一句话**（实测首轮就带角色：回复以「喵~」结尾）
+
+   ![首轮就带角色](docs/screenshots/persona-reply.jpg)
+   *第一轮就生效 —— chip 已显示「赛博猫娘」，回复以角色口吻作答。*
+
+2. 正常说话：
+   - 人设卡（如「赛博猫娘」）：回复以角色口吻作答；
+   - 改写卡（如「硬邦邦」）：你发的「画一张秦始皇骑北极熊」在日志里就变成了那篇暴躁甲方 prompt；
+3. 想停：chip 里的「本会话停用」／详情页「本会话停用」／命令 `/cosplay off`（**零 token**）；
+4. 想每个新会话都自动上角色：什么都不用配 —— 你**上次选过的那张卡**会被新会话自动继承
+   （`lastCardId`）；想固定成另一张就配 **设置 → 角色扮演 → 默认角色**。
+   换卡时会提示"会话里换过卡、旧口吻还在历史里"，想从干净上下文开始角色就开个新会话。
+
+命令是界面出问题时的逃生阀：
+
+| 命令 | 作用 |
+| --- | --- |
+| `/cosplay` | 状态（总开关 / 策略 / 本会话角色 / 库统计 / 最近改写） |
+| `/cosplay list [关键词]` | 卡片清单 |
+| `/cosplay on` \| `off` | 本会话开 / 关 |
+| `/cosplay none` | 本会话取消角色 |
+| `/cosplay <id \| 名字>` | 本会话换上这张卡 |
+
+---
+
+## 目录
+
+| 想了解 | 看这里 |
+| --- | --- |
+| 它到底怎么实现的 | [两条链路的机制](#mechanism) |
+| 一张卡有哪些字段 | [角色卡的数据结构](#card-schema) |
+| 卡片存在磁盘哪 | [卡片库在哪](#library) |
+| 有哪些可配的开关 | [配置](#config) |
+| 出问题了怎么看 | [诊断](#diagnostics) |
+| 凭什么说"实测有效" | [人设 × 上下文](#persona-context) · [验证记录](#evidence) |
+| 怎么核对模型真收到的字 | [核对工具](#verify) |
+| 有什么坑 | [已知限制与代价](#limits) |
+| 想改代码 | [开发](#dev) · [文件地图](#filemap) · [座位表](#seats) |
+
+---
+
+<a id="mechanism"></a>
 ## 两条链路的机制（都已实测，不是设计稿）
 
 **人设注入**：`ctx.systemPrompt.section({ name, order: 部署人设+1, interpolate: false, text })`。
@@ -58,59 +142,7 @@ host:durable-user-message seq=10 正文=571字 预览：老哥们，我时间金
 
 ---
 
-## 安装
-
-**前提：装完要重挂插件（宿主半边）**；只改浏览器半边时刷新页面即可。
-
-```bash
-# 方式一：本地链接（开发用）
-npm install && npm run build
-dsh plugin --profile web add "link:D:\developing\DSH-plugin\dsh-cosplay"
-
-# 方式二：GitHub（lib/ 已入库，免编译）
-dsh plugin --profile web add github:<you>/dsh-cosplay
-```
-
-> **DSH Desktop 用户**：`desktop` profile 由 Electron 独占管理，命令行会被拒绝，
-> 请在**设置 → 插件**界面填仓库地址（或本地路径）。
-
-没网时：`node scripts/link-sdk.mjs` 把 `node_modules/@deepseek-ai/*` 指向本机 SDK 镜像，
-`npx tsc --noEmit` 与 `npm run build` 照样能跑（只需要 typescript 与 tsdown 在本地）。
-
----
-
-## 快速上手
-
-**新建会话的第一屏就能选角**：输入框左下角（`+` / 权限 / 模式 那一排）有一个 `🎭 无角色` 胶囊 ——
-点它弹出卡片列表，选一张，然后直接发第一句话。第二轮开始顶部才会出现
-「对话 / 轨迹 / **角色**」页签，那里是卡片管理面（网格 / 二级详情 / 编辑 / 立绘 / 导入导出）。
-
-> **为什么入口在输入框而不是页签**：DSH 的**空白会话不渲染页签条**
-> （`dsh-client-ui-conversation`：`showTabs = !hideChrome && …`，空白态 `hideChrome = blank`；
-> 视图区在 blank 阶段直接 `return null`）。所以"打开角色页签再选角"对**第一轮**根本不成立 ——
-> chip 就是为这件事存在的：它随会话视图挂载，**在你敲字之前就把"本会话用哪张卡"写进宿主**。
-
-1. **新建会话 → 点 chip → 选一张卡 → 发第一句话**（实测首轮就带角色：回复以「喵~」结尾）；
-2. 正常说话：
-   - 人设卡（如「赛博猫娘」）：回复以角色口吻作答；
-   - 改写卡（如「硬邦邦」）：你发的「画一张秦始皇骑北极熊」在日志里就变成了那篇暴躁甲方 prompt；
-3. 想停：chip 里的「本会话停用」／详情页「本会话停用」／命令 `/cosplay off`（**零 token**）；
-4. 想每个新会话都自动上角色：什么都不用配 —— 你**上次选过的那张卡**会被新会话自动继承
-   （`lastCardId`）；想固定成另一张就配 **设置 → 角色扮演 → 默认角色**。
-   换卡时会提示"会话里换过卡、旧口吻还在历史里"，想从干净上下文开始角色就开个新会话。
-
-命令是界面出问题时的逃生阀：
-
-| 命令 | 作用 |
-| --- | --- |
-| `/cosplay` | 状态（总开关 / 策略 / 本会话角色 / 库统计 / 最近改写） |
-| `/cosplay list [关键词]` | 卡片清单 |
-| `/cosplay on` \| `off` | 本会话开 / 关 |
-| `/cosplay none` | 本会话取消角色 |
-| `/cosplay <id \| 名字>` | 本会话换上这张卡 |
-
----
-
+<a id="card-schema"></a>
 ## 角色卡的数据结构
 
 一张卡（`CosplayCard`）的字段与上限：
@@ -158,6 +190,7 @@ dsh plugin --profile web add github:<you>/dsh-cosplay
 
 ---
 
+<a id="library"></a>
 ## 卡片库在哪
 
 ```
@@ -175,12 +208,16 @@ dsh plugin --profile web add github:<you>/dsh-cosplay
 
 ---
 
+<a id="config"></a>
 ## 配置
 
 两处入口，各管各的：
 
 - **侧栏 插件 → 已安装 → dsh-cosplay 的设置表单**（技术参数，由插件 Config 投影）
 - **设置 → 角色扮演**（卡片库管理 + 实时诊断）
+
+![设置 → 角色扮演](docs/screenshots/settings.jpg)
+*「设置 → 角色扮演」页 —— 卡片库统计、链路计数（宿主实时读数）、最近诊断流。*
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -211,6 +248,7 @@ dsh plugin --profile web add github:<you>/dsh-cosplay
 
 ---
 
+<a id="diagnostics"></a>
 ## 诊断
 
 浏览器控制台宿主看不到，所以关键动作都会经 `POST /api/dsh-cosplay/debug` 回传宿主的环形缓冲：
@@ -245,6 +283,7 @@ node test/live-probe.mjs 19387
 
 ---
 
+<a id="persona-context"></a>
 ## 人设 × 上下文（实测 + 文献，不是感觉）
 
 > **四份配套文档**（2026-10）：
@@ -315,6 +354,7 @@ C 前 2 轮**硬邦邦**（用户消息被改写成甲方文）→ 第 3 轮切�
 
 ---
 
+<a id="verify"></a>
 ## 怎么核对模型真正收到的东西
 
 浏览器控制台宿主看不到，所以除了诊断端点，还有两个**直接读会话日志原始字节**的工具
@@ -336,6 +376,7 @@ node scripts/inspect-persona.mjs --scan --only-persona
 
 ---
 
+<a id="limits"></a>
 ## 已知限制与代价（说清楚，不埋在代码里）
 
 - **改写要多一次模型调用**：实测 3.3s（手动改写端点、deepseek-flash、10 字 → 579 字）
@@ -373,6 +414,7 @@ node scripts/inspect-persona.mjs --scan --only-persona
 
 ---
 
+<a id="dev"></a>
 ## 开发
 
 ```bash
@@ -413,6 +455,7 @@ dsh --profile lab --port 31999 --no-open      # 拿到带 token 的 URL，用浏
 
 ---
 
+<a id="filemap"></a>
 ## 文件地图
 
 | 路径 | 作用 |
@@ -441,6 +484,7 @@ dsh --profile lab --port 31999 --no-open      # 拿到带 token 的 URL，用浏
 
 ---
 
+<a id="seats"></a>
 ## 座位表（它长在哪）
 
 | 面 | 座位 | 说明 |
@@ -454,6 +498,7 @@ dsh --profile lab --port 31999 --no-open      # 拿到带 token 的 URL，用浏
 
 ---
 
+<a id="evidence"></a>
 ## 验证记录（本机）
 
 - **M0 探针**：客户端 bundle 装载 / 页签注册与显示 / `agent.id` 可读 / 改写进 durable `user/message`
@@ -464,3 +509,16 @@ dsh --profile lab --port 31999 --no-open      # 拿到带 token 的 URL，用浏
   - 桌面端（0.2.0-rc.1）同一份代码同样激活成功。
 - **单测**：80 条全过（含产物契约、peer 兼容、坏库隔离、失败回落）。
 - **类型检查**：两套 SDK（0.1.7-rc.2 / 0.2.0-rc.1）都 0 错误。
+
+---
+
+<a id="license"></a>
+## 许可
+
+BSD-3-Clause —— 声明见 [`package.json`](package.json) 的 `license` 字段。
+
+---
+
+## 相关
+
+- [awesome-dsh-plugin](https://github.com/liceses/awesome-dsh-plugin) —— DSH 插件精选列表，本插件收录其中。
