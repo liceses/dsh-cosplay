@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
+import { createPortal } from 'react-dom'
 import type { CardMeta } from '../types.js'
 import { useSessionCard } from './binding.js'
 import { postDebug } from './api.js'
@@ -159,7 +160,7 @@ export function CardChip({ sessionId: rawSessionId, openView, defaults }: CardCh
         {card !== null && card.mode !== 'system' ? <span className="dsh-cosplay-chip-mode">{modeLabel(card)}</span> : null}
       </button>
 
-      {open && anchor !== undefined ? (
+      {open && anchor !== undefined ? createPortal(
         <div
           id="dsh-cosplay-chip-panel"
           className="dsh-cosplay-pop"
@@ -253,7 +254,8 @@ export function CardChip({ sessionId: rawSessionId, openView, defaults }: CardCh
               管理卡片…
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </>
   )
