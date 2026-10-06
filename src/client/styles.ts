@@ -175,7 +175,7 @@ export const CSS = `
   font-size: 11px; border-radius: 6px; flex: none;
 }
 .dsh-cosplay-pop {
-  position: fixed; z-index: 60; width: 300px;
+  position: fixed; z-index: 1000; width: 300px;
   display: flex; flex-direction: column;
   background: var(--dsw-alias-bg-overlay, var(--dsw-alias-bg-layer-1, #fff));
   border: 1px solid var(--dsw-alias-border-l1, #e4e7ec);

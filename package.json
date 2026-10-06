@@ -81,6 +81,7 @@
     "@deepseek-ai/schemastery": "3.18.4",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.0",
     "react": "^18.3.1",
     "semver": "^7.8.5",
     "tsdown": "0.22.2",

@@ -12,9 +12,13 @@
  *
  * ## 交互
  *
- * 点 chip → 在它上方弹一个浮层（`position: fixed`，锚在按钮的 rect 上，避免被输入框的
- * overflow 裁掉）：卡片列表（带立绘小图/表情、模式角标、当前项高亮）+ 停用/无角色。
- * 点浮层外任意处关闭。
+ * 点 chip → 在它上方弹一个浮层（`position: fixed` + **portal 到 `document.body`**）：卡片列表
+ * （带立绘小图/表情、模式角标、当前项高亮）+ 停用/无角色。点浮层外任意处关闭。
+ *
+ * **为什么要 portal**（来自外部反馈 issue #2 / PR #3，实测确认）：`position: fixed` 会被**任何
+ * 建立了层叠上下文的祖先**（`transform` / `filter` / `backdrop-filter` / `opacity < 1` / 自身 `z-index`…）
+ * 限制在那个上下文里 —— 此时 `z-index` 调到 21 亿也压不过外面的区域。挂到 `body` 才是真正的视口定位。
+ * 浮层锚点还要跟着 chip 走（resize / 滚动 / 输入框被撑高），见 `place()` 与它下面的 effect。
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
@@ -82,18 +86,41 @@ export function CardChip({ sessionId: rawSessionId, openView, defaults }: CardCh
     postDebug({ kind: 'chip-mounted', sessionId, note: '输入框角色 chip 已挂载（首轮即可选角）' })
   }, [sessionId])
 
+  /** 按当前按钮位置算浮层锚点（打开时与窗口变化时都用它）。 */
+  const place = useCallback((): void => {
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (rect === undefined) return
+    const cards = state.library?.cards.length ?? 0
+    const height = Math.min(360, 118 + cards * 34)
+    const left = Math.max(8, Math.min(rect.left, Math.max(8, window.innerWidth - 308)))
+    const above = rect.top > height + 16
+    setAnchor(above ? { left, bottom: window.innerHeight - rect.top + 6 } : { left, top: rect.bottom + 6 })
+  }, [state.library])
+
   /** 打开浮层：优先在按钮正上方，上方放不下就翻到下方。 */
   const toggle = useCallback(() => {
-    const rect = buttonRef.current?.getBoundingClientRect()
-    if (rect !== undefined) {
-      const cards = state.library?.cards.length ?? 0
-      const height = Math.min(360, 118 + cards * 34)
-      const left = Math.max(8, Math.min(rect.left, Math.max(8, window.innerWidth - 308)))
-      const above = rect.top > height + 16
-      setAnchor(above ? { left, bottom: window.innerHeight - rect.top + 6 } : { left, top: rect.bottom + 6 })
-    }
+    place()
     setOpen((value) => !value)
-  }, [state.library])
+  }, [place])
+
+  /**
+   * 浮层开着的时候跟着 chip 走：窗口 resize、页面滚动、以及输入框被多行内容撑高时，
+   * 按钮的 rect 都会变；只在点击那一刻算一次的话，浮层会与 chip 脱开
+   * （这条是 PR #3 作者提的可选改进，实测确实会脱开）。
+   */
+  useEffect(() => {
+    if (!open) return
+    const reposition = (): void => place()
+    window.addEventListener('resize', reposition)
+    window.addEventListener('scroll', reposition, true)
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(reposition)
+    if (observer !== undefined && buttonRef.current !== null) observer.observe(buttonRef.current)
+    return () => {
+      window.removeEventListener('resize', reposition)
+      window.removeEventListener('scroll', reposition, true)
+      observer?.disconnect()
+    }
+  }, [open, place])
 
   // 点浮层外 / Esc 关闭。
   useEffect(() => {
