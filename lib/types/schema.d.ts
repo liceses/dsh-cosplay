@@ -48,6 +48,7 @@ export declare const Config: Schema<Schemastery.ObjectS<NoInfer<{
     storagePath: Schema<string, string, "volatile-defined">;
     artMaxEdge: Schema<number, number, "volatile-defined">;
     artQuality: Schema<number, number, "volatile-defined">;
+    enableProbeEndpoints: Schema<boolean, boolean, "volatile-defined">;
     traceSize: Schema<number, number, "volatile-defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     enabled: Schema<boolean, boolean, "volatile-defined">;
@@ -75,6 +76,7 @@ export declare const Config: Schema<Schemastery.ObjectS<NoInfer<{
     storagePath: Schema<string, string, "volatile-defined">;
     artMaxEdge: Schema<number, number, "volatile-defined">;
     artQuality: Schema<number, number, "volatile-defined">;
+    enableProbeEndpoints: Schema<boolean, boolean, "volatile-defined">;
     traceSize: Schema<number, number, "volatile-defined">;
 }>>, "plain">;
 /**

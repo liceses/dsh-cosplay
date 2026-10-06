@@ -12,11 +12,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createLibrary } from '../lib/library.js'
 import { createState } from '../lib/state.js'
-import { createCosplayRoute } from '../lib/route.js'
+import { admissionStatus, createCosplayRoute, localFenceRejection } from '../lib/route.js'
 import { createTrace } from '../lib/trace.js'
 
 /** 沙箱 + 路由。 */
-function setup({ llm } = {}) {
+function setup({ llm, config } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'cosplay-route-'))
   const presetDir = join(dir, 'presets')
   mkdirSync(presetDir, { recursive: true })
@@ -52,6 +52,9 @@ function setup({ llm } = {}) {
       rewriteModel: '',
       rewriteTimeoutMs: 5000,
       rewriteOnFailure: 'original',
+      // 真实默认值：探针端点默认关（issue #1）
+      enableProbeEndpoints: false,
+      ...config,
     }),
     stats,
     trace,
@@ -301,4 +304,67 @@ test('诊断端点与 404：/stats 可读，未知路径 404', async () => {
   } finally {
     box.done()
   }
+})
+
+/* ─────────────── 准入围栏（外部安全报告 issue #1）─────────────── */
+
+test('admissionStatus：优先借框架的 connection.requestRejection，服务不在才退回本地围栏', () => {
+  const req = { headers: { host: '127.0.0.1:19387' } }
+  assert.equal(admissionStatus({ get: () => ({ requestRejection: () => undefined }) }, req), undefined)
+  assert.equal(admissionStatus({ get: () => ({ requestRejection: () => 401 }) }, req), 401)
+  assert.equal(admissionStatus({ get: () => ({ requestRejection: () => 403 }) }, req), 403)
+  // 围栏自己抛错 → 失败关闭（宁可拒绝也不放行）
+  assert.equal(
+    admissionStatus(
+      {
+        get: () => ({
+          requestRejection: () => {
+            throw new Error('boom')
+          },
+        }),
+      },
+      req,
+    ),
+    403,
+  )
+  // 服务不在 / 形状不对 → 退回本地围栏（回环 + 无 Origin → 放行）
+  assert.equal(admissionStatus({ get: () => undefined }, req), undefined)
+  assert.equal(admissionStatus({ get: () => ({}) }, req), undefined)
+  assert.equal(admissionStatus({}, req), undefined, 'ctx 连 get 都没有时也不能把插件变成不可用')
+})
+
+test('本地等价围栏：拒跨站、拒非同源 Origin、拒非回环 Host', () => {
+  const host = '127.0.0.1:19387'
+  assert.equal(localFenceRejection({ headers: { host } }), undefined, '本机原生客户端（无 Origin）放行')
+  assert.equal(localFenceRejection({ headers: { host, 'sec-fetch-site': 'cross-site' } }), 403)
+  assert.equal(localFenceRejection({ headers: { host, origin: 'https://evil.example' } }), 403)
+  assert.equal(localFenceRejection({ headers: { host, origin: 'http://127.0.0.1:19387' } }), undefined)
+  assert.equal(localFenceRejection({ headers: { host, origin: 'http://127.0.0.1:9999' } }), 403, '端口不同也算跨源')
+  assert.equal(localFenceRejection({ headers: { host: '192.168.1.9:3080' } }), 403)
+  assert.equal(localFenceRejection({ headers: {} }), 403)
+})
+
+test('跨站请求打不到端点（整条路由上验证 403）', async () => {
+  const box = setup()
+  const denied = await call(box.route, 'GET', '/api/dsh-cosplay/stats', undefined, {
+    origin: 'https://evil.example',
+    'sec-fetch-site': 'cross-site',
+  })
+  assert.equal(denied.status, 403)
+  // 同一个端点、正常来源照常可用
+  const ok = await call(box.route, 'GET', '/api/dsh-cosplay/stats')
+  assert.equal(ok.status, 200)
+})
+
+test('probe/* 默认关闭（403 且提示开关名），显式打开才可用', async () => {
+  const off = setup()
+  const denied = await call(off.route, 'POST', '/api/dsh-cosplay/probe/arm', { armed: true })
+  assert.equal(denied.status, 403, 'probe 端点默认必须不可用')
+  assert.match(String(denied.json.error), /enableProbeEndpoints/)
+
+  const on = setup({ config: { enableProbeEndpoints: true } })
+  const allowed = await call(on.route, 'POST', '/api/dsh-cosplay/probe/arm', { armed: true })
+  assert.equal(allowed.status, 200)
+  assert.equal(allowed.json.ok, true)
+  assert.equal(on.probe.armed, true)
 })

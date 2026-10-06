@@ -113,6 +113,15 @@ export interface CosplayConfig {
     artMaxEdge: number;
     /** 立绘压缩质量（0.1..1）。 */
     artQuality: number;
+    /**
+     * 是否挂载 /probe/* 三个**开发期自检端点**（默认**关**）。
+     *
+     * 为什么默认关：probe/turn 会把请求体里的任意文本当真实用户输入投给 agent（继承 profile 的
+     * 权限模式），probe/archive 能停/归档任意会话，probe/arm 改全局状态。跑
+     * 	est/live-probe.mjs、scripts/experiment-persona.mjs 这类自检/对照实验时才需要打开
+     * （外部安全报告 issue #1）。
+     */
+    enableProbeEndpoints: boolean;
     /** 诊断环形缓冲容量。 */
     traceSize: number;
 }

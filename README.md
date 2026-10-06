@@ -207,6 +207,7 @@ dsh plugin --profile web add github:<you>/dsh-cosplay
 | `storagePath` | 空 | 卡片库目录；留空 = `<DSH_HOME>/cosplay`（**改完重挂插件生效**） |
 | `artMaxEdge` / `artQuality` | `1024` / `0.85` | 立绘压缩 |
 | `traceSize` | `200` | 诊断环形缓冲容量 |
+| `enableProbeEndpoints` | `false` | 是否挂载 `/probe/*` 三个**开发期自检端点**。默认关：它们能把任意文本当用户消息投给 agent、能停/归档任意会话（跑 `test/live-probe.mjs`、对照实验脚本时才打开；详见下方「已知限制」） |
 
 ---
 
@@ -354,8 +355,18 @@ node scripts/inspect-persona.mjs --scan --only-persona
   subagent 与后台会话上。要改：`injectIntoUnboundSessions`。
 - **本会话的"换过卡"提示只看绑定历史**（`cardsSeen`，≤4 张），它不读会话正文，
   所以只是"提醒"，不是精确的"污染度"度量。
-- **路由没有鉴权**：只监听回环 Host、不发 CORS 头、写端点有体积上限、立绘按字节签名校验。
-  本机任意页面理论上可调（与 dsh-memes-reply 同款围栏）。
+- **路由的准入边界与框架同级**（2026-10-06 修正，源自外部安全报告 [issue #1](https://github.com/liceses/dsh-cosplay/issues/1)）：
+  我们的前缀 `/api/dsh-cosplay` 比框架的 `/api` **长**，而宿主 webserver 是 `Longest-prefix-wins`，
+  所以框架自己那道 `/api` 围栏在我们的路径上**不会执行** —— 曾经因此裸奔（本机任意进程、甚至跨站页面
+  都能调；`probe/turn` 能把任意文本当用户输入投给 agent）。现在每个请求先过
+  `connection.requestRejection()`（框架原话：先 Host/Origin 围栏、再浏览器会话鉴权），
+  与框架 `/api` 完全同级：**带页面 cookie 的正常请求 200 / 无 cookie 的本机进程 401 /
+  跨站 403**。服务不在时退回本地等价围栏（回环 + 拒 `sec-fetch-site: cross-site` + Origin 必须同源）。
+- **`probe/*` 三个自检端点默认关闭**（`enableProbeEndpoints`，默认 `false`）：它们能把任意文本当用户
+  消息投给 agent、能停/归档任意会话，所以不默认张开。跑 `test/live-probe.mjs`、
+  `scripts/experiment-persona.mjs` 这类自检/对照实验时在配置里打开。
+- **残留风险（诚实说明）**：本机进程若**拿到了浏览器会话 cookie**，仍可调用这些端点
+  —— 这与框架自己的 `/api` 是同一等级，是本机 HTTP 服务的固有边界，不是本插件独有的口子。
 - **立绘走 `<DSH_HOME>` 磁盘**，不进官方附件流水线（那会把动画压成静图；这里也一样，
   所以只收 4 种静态格式）。
 - 只做了中文界面（英文留 M2）。
