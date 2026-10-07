@@ -2,7 +2,7 @@
 
 > **English**: A DeepSeek Harness plugin that puts the model in character — either by injecting a persona card into the system prompt, or by rewriting your message before the model ever sees it.
 
-[![DSH Plugin](https://img.shields.io/badge/DSH-plugin-4f46e5.svg)](https://github.com/liceses/awesome-dsh-plugin)
+[![DSH Plugin](https://img.shields.io/badge/DSH-plugin-4f46e5.svg)](https://github.com/topics/dsh-plugin)
 ![DSH version](https://img.shields.io/badge/DSH-%E2%89%A50.1.7--rc.1%20%3C0.3-0ea5e9.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 
@@ -521,4 +521,4 @@ BSD-3-Clause —— 声明见 [`package.json`](package.json) 的 `license` 字�
 
 ## 相关
 
-- [awesome-dsh-plugin](https://github.com/liceses/awesome-dsh-plugin) —— DSH 插件精选列表，本插件收录其中。
+- [awesome-dsh-plugin](https://github.com/liceses/awesome-dsh-plugin) —— DSH 插件精选列表（第三方整理）。**本插件尚未被它收录**；想找更多 DSH 插件可以看 [dsh-plugin 话题页](https://github.com/topics/dsh-plugin)。
